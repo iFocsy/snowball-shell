@@ -1,0 +1,9 @@
+system windows_dll
+option quiet, map, statics
+option modname=SNSYSTEM
+option description 'Snowball system library: hooks, skin, drawing, processor time, Open and Save As'
+name SNSYSTEM.DLL
+library toolhelp
+export WEP resident
+segment type code preload fixed
+segment type data preload fixed

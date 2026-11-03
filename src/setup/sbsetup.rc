@@ -1,0 +1,11 @@
+/* Built with the shell's resources folder in the include path. */
+#include <windows.h>
+#include "resource.h"
+
+IDI_SNOWBALL    ICON "MAINICON.ICO"
+
+#define VER_TYPE        VFT_APP
+#define VER_DESCRIPTION "Snowball Setup's helper: INI files, system font, long file names\0"
+#define VER_NAME        "SBSETUP\0"
+#define VER_FILE        "SBSETUP.EXE\0"
+#include "..\include\version.rc"

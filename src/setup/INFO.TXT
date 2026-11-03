@@ -1,0 +1,20 @@
+Snowball is installed. Windows restarts so that it becomes the shell.
+
+What Setup changed
+- SYSTEM.INI: shell= and taskman.exe= are Snowball's (Ctrl+Esc opens its Start menu); fonts.fon is SBSANS8.FON, Windows 98's menu and dialog font, made from this Windows' own fonts; WinTimeSlice=200,50 gives Windows programs more time beside busy DOS boxes.
+- WIN.INI and CONTROL.INI: Windows 98's colour scheme.
+- LFN.DRV, long file names for Windows programs, if you chose it: in WINDOWS\SYSTEM, loaded at startup. It needs a DOS with long file names (DOSBox-X with lfn=true, or a DOS LFN driver).
+Each value replaced is kept in UNINSTAL.INI, in Snowball's folder, and the uninstaller puts it back.
+
+Under DOSBox-X
+- Snowball shares the clipboard's text with the host through DOSBox-X's CLIP$ device. In the [dos] section of DOSBox-X's configuration file:
+    dos clipboard device enable = true
+- For Shut Down to close DOSBox-X, put these lines after the line that starts Windows in the [autoexec] section (with Snowball's folder, if it is not C:\WINDOWS\SHELL):
+    if exist C:\WINDOWS\SHELL\POWEROFF.FLG goto poweroff
+    goto end
+    :poweroff
+    del C:\WINDOWS\SHELL\POWEROFF.FLG
+    exit
+    :end
+
+To remove Snowball: Start > Programs > Snowball > Uninstall Snowball.

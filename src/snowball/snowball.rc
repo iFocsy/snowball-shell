@@ -1,0 +1,13 @@
+/* Built with the shell's resources folder in the include path. */
+#include <windows.h>
+#include "resource.h"
+
+/* What folders show for SNOWBALL.EXE; in memory from the start and never
+   reloaded from the file, which Setup may replace while the shell runs */
+IDI_SNOWBALL    ICON PRELOAD FIXED "MAINICON.ICO"
+
+#define VER_TYPE        VFT_APP
+#define VER_DESCRIPTION "Snowball shell\0"
+#define VER_NAME        "SNOWBALL\0"
+#define VER_FILE        "SNOWBALL.EXE\0"
+#include "..\\include\\version.rc"

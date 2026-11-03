@@ -1,0 +1,6 @@
+system windows
+option quiet, map, statics
+option stack=16k, heapsize=8k
+option resource=..\snshell\snshell.res
+name UNITTEST.EXE
+library commdlg, shell, toolhelp, ver, mmsystem, snsystem

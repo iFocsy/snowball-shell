@@ -1,0 +1,17 @@
+LFN.DRV - long file names for Windows 3.11 programs under DOSBox-X
+====================================================================
+
+Gives Windows 3.11 programs the Windows 95 long file name API
+(INT 21h AX=71xxh), using the LFN support built into DOSBox-X.
+
+Install:
+  1. copies LFN.DRV to drive-c\WINDOWS\SYSTEM
+  2. adds lfn.drv to the "drivers=" line in [boot] of SYSTEM.INI, and
+     a [lfn.drv] section with LongPaths=1
+  3. sets "lfn = true" in the [dos] section of w311.conf
+
+* Skip 1 and 2 if you installed from Snowball's Inno Setup
+
+LongPaths=1: plain Windows 3.1 programs can open, create, delete, find and
+rename with long paths too (their 8.3 calls get the aliases). LongPaths=0
+turns that off. Windows reads it when it starts.

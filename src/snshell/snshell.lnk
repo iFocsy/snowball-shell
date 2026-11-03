@@ -1,0 +1,9 @@
+system windows_dll
+option quiet, map, statics
+option modname=SNSHELL
+option description 'Snowball shell: desktop, folders, taskbar, Start menu, Task Manager'
+option heapsize=4k
+option resource=snshell.res
+name SNSHELL.DLL
+library commdlg, shell, toolhelp, ver, mmsystem, snsystem
+export WEP resident

@@ -1,0 +1,19 @@
+# Made by build.ps1 and makesetup.ps1
+/build/
+/release/
+/setup/
+
+# The build's tools (tools\buildtools.ps1): what it downloaded and this machine's paths.ini
+/build-tools/
+
+# The tests run on a local DOSBox-X harness (outside the repository)
+/tests/
+
+# Leftovers
+*.err
+*.map
+*.obj
+__pycache__/
+
+# The maintainer's technical notes
+/docs/

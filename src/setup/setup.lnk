@@ -1,0 +1,6 @@
+system windows
+option quiet, map
+option stack=8k, heapsize=1k
+option description 'Snowball Setup helper'
+option resource=sbsetup.res
+name SBSETUP.EXE

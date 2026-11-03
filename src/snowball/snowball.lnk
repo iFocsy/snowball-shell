@@ -1,0 +1,8 @@
+system windows
+option quiet, map, statics
+option stack=20k, heapsize=1k
+option description 'Snowball shell'
+option resource=snowball.res
+name SNOWBALL.EXE
+# the libraries are loaded at run time; the code never comes back from the file
+segment type code preload fixed
