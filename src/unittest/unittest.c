@@ -116,6 +116,31 @@ static void TestPaths(void)
     CHECK(!PathIsProgram("C:\\README.TXT"));
 }
 
+/* DOS dates and times by regional settings, whatever this Windows has: date
+   picture, 24 hours, leading zero; a day in the afternoon and one in the morning. */
+static void TestRegion(LPCSTR picture, LPCSTR hours24, LPCSTR zero, LPCSTR pm, LPCSTR am)
+{
+    static const char *const keys[] = { "sShortDate", "iTime", "iTLZero", "sTime", "s1159", "s2359" };
+    char saved[6][40], s[64];
+    int k;
+
+    for (k = 0; k < 6; k++)
+        GetProfileString("intl", keys[k], "", saved[k], sizeof saved[k]);
+    WriteProfileString("intl", "sShortDate", picture);
+    WriteProfileString("intl", "iTime", hours24);
+    WriteProfileString("intl", "iTLZero", zero);
+    WriteProfileString("intl", "sTime", ":");
+    WriteProfileString("intl", "s1159", "AM");
+    WriteProfileString("intl", "s2359", "PM");
+    /* DOS date: (year - 1980) << 9 | month << 5 | day; time: h << 11 | m << 5 | s / 2 */
+    FormatDateTime((WORD)((2026 - 1980) << 9 | 10 << 5 | 26), (WORD)(18 << 11 | 58 << 5 | 12 / 2), s);
+    CHECK_STR(s, pm);
+    FormatDateTime((WORD)((2026 - 1980) << 9 | 2 << 5 | 4), (WORD)(7 << 11 | 5 << 5 | 6 / 2), s);
+    CHECK_STR(s, am);
+    for (k = 0; k < 6; k++)
+        WriteProfileString("intl", keys[k], saved[k][0] ? saved[k] : NULL);
+}
+
 static void TestFormats(void)
 {
     char s[80];
@@ -142,9 +167,89 @@ static void TestFormats(void)
     FormatKB(1263616L, s);
     CHECK_STR(s, Thousands("1,234KB"));
 
-    /* DOS date: (year - 1980) << 9 | month << 5 | day; time: h << 11 | m << 5 | s / 2 */
-    FormatDateTime((WORD)((2026 - 1980) << 9 | 10 << 5 | 26), (WORD)(18 << 11 | 58 << 5 | 12 / 2), s);
-    CHECK_STR(s, "2026/10/26 18:58:12");
+    TestRegion("dd-MM-yy", "1", "1", "26-10-26 18:58:12", "04-02-26 07:05:06");
+    TestRegion("M/d/yyyy", "0", "0", "10/26/2026 6:58:12 PM", "2/4/2026 7:05:06 AM");
+    TestRegion("yyyy.MM.dd", "1", "0", "2026.10.26 18:58:12", "2026.02.04 7:05:06");
+}
+
+/* Long names' extensions are cut to fit the registry keys built from them. */
+static void TestTypes(void)
+{
+    char s[80];
+
+    FormatFileType("notes.markdown", s);
+    CHECK_STR(s, "MARKDOW File");
+    CHECK(!FileTypeClass("averyveryverylongextension", s, sizeof s));
+}
+
+/* A BMP is drawn only when its header and bits are where it says. */
+static void TestDib(void)
+{
+    static BYTE bmp[58] = { 'B', 'M', 58, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0,     /* the bits at 54 */
+                            40, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 24 };   /* 1x1, 24 bits */
+    char path[MAX_PATH];
+    HFILE h;
+    DIB d;
+
+    lstrcpy(path, work);
+    PathAppend(path, "PIC.BMP");
+    h = DosCreate(path);
+    _lwrite(h, bmp, sizeof bmp);
+    _lclose(h);
+    CHECK(DibLoad(path, &d) && d.w == 1 && d.h == 1 && d.bits == 40);
+    DibFree(&d);
+    bmp[10] = 200;                      /* bits past the end */
+    h = DosCreate(path);
+    _lwrite(h, bmp, sizeof bmp);
+    _lclose(h);
+    CHECK(!DibLoad(path, &d));
+    CHECK(DosCreateTextFile(path, "BMW notes, not a picture") && !DibLoad(path, &d));
+}
+
+/* The pictures in PICTURES beside the program, if any (tests\pictures.py puts
+   them there and compares what comes out): each made into a BMP per style,
+   for a screen of 320 x 240, in WORK. */
+static void TestPictures(void)
+{
+    char dir[MAX_PATH], spec[MAX_PATH], from[MAX_PATH], to[MAX_PATH], text[80];
+    DOSENTRY e;
+    DOSFIND f;
+    IMAGEJOB job;
+    DIB d;
+    int r;
+
+    lstrcpy(dir, work);
+    PathToParent(dir);
+    PathAppend(dir, "PICTURES");
+    lstrcpy(spec, dir);
+    PathAppend(spec, "*.*");
+    if (!DosFindFirst(spec, &f, &e))
+        return;
+    job.w = 320;
+    job.h = 240;
+    job.back = RGB(0, 128, 128);
+    job.progress = NULL;
+    do {
+        if (e.name[0] == '.')
+            continue;
+        lstrcpy(from, dir);
+        PathAppend(from, e.name);
+        for (job.style = 0; job.style < WP_STYLES; job.style++) {
+            r = ImageMakeDib(from, &job, 0, &d);
+            if (r == IMAGE_OK) {
+                lstrcpy(to, work);
+                PathAppend(to, e.name);
+                wsprintf(PathExtension(to), "_%d.BMP", job.style);
+                r = ImageWriteBitmap(&d, to, 24);
+                DibFree(&d);
+            }
+            if (r != IMAGE_OK) {
+                wsprintf(text, "picture %s style %d: error %d", (LPSTR)e.name, job.style, r);
+                Log(text);
+            }
+        }
+    } while (DosFindNext(&f, &e));
+    DosFindClose(&f);
 }
 
 static void TestLists(void)
@@ -255,6 +360,9 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int show)
 
     TestPaths();
     TestFormats();
+    TestTypes();
+    TestDib();
+    TestPictures();
     TestLists();
     TestSort();
     TestLaunch();

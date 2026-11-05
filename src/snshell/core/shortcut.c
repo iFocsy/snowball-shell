@@ -3,8 +3,6 @@
 
 static const char Section[] = "[Shortcut]";
 
-static SHORTCUT s;                     /* large: one for the module, never in use twice */
-
 BOOL ShortcutRead(LPCSTR path, SHORTCUT *s)
 {
     char file[MAX_PATH];
@@ -21,6 +19,23 @@ BOOL ShortcutRead(LPCSTR path, SHORTCUT *s)
     s->show = GetPrivateProfileInt("Shortcut", "Show", SW_SHOWNORMAL, file);
     s->hotkey = GetPrivateProfileInt("Shortcut", "HotKey", 0, file);
     return s->target[0] != '\0';
+}
+
+/* One line alone, for callers that need no more (hovering, scanning). */
+WORD ShortcutHotKey(LPCSTR path)
+{
+    char file[MAX_PATH];
+
+    DosShortPath(path, file);
+    return GetPrivateProfileInt("Shortcut", "HotKey", 0, file);
+}
+
+BOOL ShortcutTarget(LPCSTR path, LPSTR target)
+{
+    char file[MAX_PATH];
+
+    DosShortPath(path, file);
+    return GetPrivateProfileString("Shortcut", "Target", "", target, MAX_PATH, file) != 0;
 }
 
 /* Written in one go so that long file names work (the profile APIs only
@@ -41,6 +56,7 @@ BOOL ShortcutWrite(LPCSTR path, const SHORTCUT *s)
 BOOL ShortcutCreate(LPCSTR target, LPCSTR dir, BOOL named)
 {
     char base[MAX_PATH], path[MAX_PATH];
+    SHORTCUT s;
 
     if (PathIsShortcut(target)) {                   /* a shortcut to a shortcut is a copy */
         if (!ShortcutRead(target, &s))

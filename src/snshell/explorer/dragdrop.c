@@ -250,6 +250,8 @@ void DragDropRun(HWND src, BOOL right)
 {
     UINT up = right ? WM_RBUTTONUP : WM_LBUTTONUP;
     BOOL dropped = FALSE;
+    int keys, held = -1;
+    POINT at;
     DRAG d;
 
     d.src = src;
@@ -262,7 +264,12 @@ void DragDropRun(HWND src, BOOL right)
         return;
     LoadCursors();
     SetCapture(src);
-    do {
+    do {                                /* again when the pointer or Ctrl and Shift changed */
+        GetCursorPos(&at);
+        keys = (GetKeyState(VK_CONTROL) < 0) | (GetKeyState(VK_SHIFT) < 0) << 1;
+        if (keys == held && at.x == d.p.x && at.y == d.p.y)
+            continue;
+        held = keys;
         Aim(&d);
         TaskbarDragOver(&d.p);
         Effect(&d);

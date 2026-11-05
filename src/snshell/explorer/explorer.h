@@ -17,7 +17,7 @@ void FolderWindowExplore(LPCSTR path);            /* the same with the folder tr
 void FolderWindowSelect(LPCSTR path);             /* its folder's window, with it selected */
 BOOL FolderWindowRegister(void);
 
-/* ---- filecommands.c: file commands, menus, keys and drops of both ---- */
+/* ---- filecommands.c: file commands, keys and drops of both ---- */
 #define CMD_OPEN        100
 #define CMD_CUT         101
 #define CMD_COPY        102
@@ -60,22 +60,13 @@ BOOL FolderWindowRegister(void);
 #define CMD_THUMBS      143             /* View > Thumbnails (CMD_LARGE + IVM_THUMBS is taken) */
 #define CMD_COMPACT     144             /* View > Toolbars > Compact */
 #define CMD_ABOUT       145             /* Help > About Snowball */
+#define CMD_PIN         146             /* a program's Pin to (Unpin from) Start menu */
+#define CMD_DOSHERE     147             /* MS-DOS Prompt Here: a folder's, a drive's */
+#define CMD_FORMAT      148             /* a floppy drive's */
+#define CMD_COPYDISK    149
 #define CMD_ACTION      0x0F00          /* + n: a document type's action n (Print...) */
-void  FileCommandsContextMenu(HWND owner, HWND iv);
-UINT  FileCommandsItemMenu(HWND owner, LPCSTR path, BOOL sortable, LPSTR renamed);
-UINT  FileCommandsKindMenu(HWND owner, LPCSTR path, int kind, LPSTR renamed);  /* of that IVK_* */
-                                                  /* one item outside the views (Start menu): the command */
 BOOL  FileCommandsRun(HWND owner, HWND iv, UINT cmd);
 BOOL  FileCommandsKey(HWND owner, HWND iv, WPARAM key);   /* Delete, F2, Ctrl+C... */
-void  FileCommandsInitMenu(HMENU menu, HWND iv);  /* enables the items that apply */
-BOOL  FileCommandsAvailable(HWND iv, UINT cmd);   /* it applies now (menus, toolbars) */
-HMENU FileCommandsFileMenu(BOOL bin);
-HMENU FileCommandsEditMenu(void);
-HMENU FileCommandsViewMenu(void);
-HMENU FileCommandsModesMenu(HMENU m, int checked);  /* Large Icons... Thumbnails; -1 none checked */
-UINT  FileCommandsModeCommand(int mode);          /* IVM_* -> its View command */
-void  FileCommandsLoadView(HWND iv);              /* the view and order last chosen */
-void  FileCommandsSaveView(HWND iv);
 BOOL  FileCommandsRenamed(HWND owner, HWND iv);   /* IVN_RENAME */
 int   FileCommandsRename(HWND owner, LPCSTR from, LPCSTR name, LPSTR to);  /* 1 done, 0 error, -1 kept */
 void  FileCommandsDelete(HWND owner, PATHLIST *l, BOOL purge);  /* asks, then to the bin (or for good) */
@@ -91,6 +82,25 @@ int   FileCommandsDropTarget(HWND iv, int item, LPSTR target);   /* -> path and 
 int   FileCommandsDropEffect(LPCSTR target, int kind, PATHLIST *files, BOOL ctrl, BOOL shift);
 void  FileCommandsDrop(HWND owner, LPCSTR target, int kind, PATHLIST *files, int effect);
 void  FileCommandsDropFiles(HWND iv, HDROP drop); /* WM_DROPFILES from other programs */
+
+/* ---- filemenus.c: the menus of files and folders, the commands that apply ---- */
+HMENU FileMenusFile(BOOL bin);
+HMENU FileMenusEdit(void);
+HMENU FileMenusView(void);
+HMENU FileMenusModes(HMENU m, int checked);       /* Large Icons... Thumbnails; -1 none checked */
+UINT  FileMenusModeCommand(int mode);             /* IVM_* -> its View command */
+BOOL  FileMenusAvailable(HWND iv, UINT cmd);      /* it applies now (menus, toolbars) */
+void  FileMenusInit(HMENU menu, HWND iv);         /* enables the items that apply */
+void  FileMenusContext(HWND owner, HWND iv);      /* the view's right-click menu */
+UINT  FileMenusItem(HWND owner, LPCSTR path, BOOL sortable, LPSTR renamed);
+UINT  FileMenusKind(HWND owner, LPCSTR path, int kind, LPSTR renamed);  /* of that IVK_* */
+                                                  /* one item outside the views (Start menu): its command done */
+LPCSTR FileMenusAction(UINT cmd);                 /* CMD_ACTION + n: the type action the last menu had */
+
+/* ---- folderviews.c: a view's mode and order, the folder's own or the last chosen ---- */
+void  FolderViewsLoad(HWND iv, BOOL own);      /* own: the folder's own view, if it has one */
+void  FolderViewsSave(HWND iv);
+void  FolderViewsDefault(HWND iv);             /* every folder like iv (NULL: Large Icons) */
 
 /* ---- sendto.c: Send To, the items of the SendTo folder ---- */
 #define CMD_SENDTO      0x0D00          /* + item: the menu's commands */

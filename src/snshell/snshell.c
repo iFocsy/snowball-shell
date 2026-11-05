@@ -26,6 +26,9 @@ int SNSHELL_API ShellMain(HINSTANCE exe, LPSTR cmdLine)
        refused size leaves no queue at all, so smaller ones are tried. */
     for (queue = 64; queue > 8 && !SetMessageQueue(queue); queue -= 8)
         ;
+    /* A drive with no disk fails the call, as Windows 98's shell has it,
+       instead of Windows' system-modal box (asked again at each repaint) */
+    SetErrorMode(SEM_FAILCRITICALERRORS);
     GetModuleFileName(exe, g_home, sizeof g_home);
     *PathFileName(g_home) = '\0';
     lstrcpy(g_ini, g_home);

@@ -5,6 +5,7 @@
  *                 shortcuts, launching, the Documents list
  *   ui\           windows that know nothing of the shell: the icon view,
  *                 folder tree, tabs, tooltips, icons; painting, message loop
+ *   image\        pictures: BMP, JPEG and PNG read and made any size
  *   files\        file operations with progress, Recycle Bin, file clipboard
  *   explorer\     the desktop, folder and Explorer windows and what they do
  *                 with files: commands, drag and drop, Send To, Find, Quick
@@ -35,6 +36,7 @@
 #include "snowball.h"
 #include "snsystem.h"
 #include "snshell.h"
+#include "hooks.h"                      /* the tests' hooks (src\hooks): nothing without SNOWBALL_HOOKS */
 #include "resources\resource.h"
 
 extern HINSTANCE g_hInst;               /* SNSHELL.DLL: resources, window classes */
@@ -43,6 +45,7 @@ extern BOOL g_isShell;                  /* SYSTEM.INI's shell (else run as a pro
 
 #include "core\core.h"
 #include "ui\ui.h"
+#include "image\image.h"
 #include "files\files.h"
 #include "explorer\explorer.h"
 #include "taskbar\taskbar.h"

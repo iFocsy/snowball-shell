@@ -14,6 +14,32 @@ enum { KIND_PUSH, KIND_CHECK, KIND_RADIO, KIND_GROUP, KIND_OTHER };
 static HBRUSH faceBrush;
 static HBITMAP radios[2];       /* unchecked, checked (enabled look) */
 
+/* The face brush and the radio pictures are made of system colours: made
+   again once any of those changed (Control Panel, Appearance, a scheme). */
+static void FollowColors(void)
+{
+    static const int used[] = { COLOR_BTNFACE, COLOR_WINDOW, COLOR_BTNSHADOW, COLOR_BTNHIGHLIGHT };
+    static COLORREF made[4];
+    BOOL same = faceBrush != NULL;
+    int i;
+
+    for (i = 0; i < 4; i++)
+        if (made[i] != GetSysColor(used[i])) {
+            made[i] = GetSysColor(used[i]);
+            same = FALSE;
+        }
+    if (same)
+        return;
+    if (faceBrush)
+        DeleteObject(faceBrush);
+    faceBrush = CreateSolidBrush(made[0]);
+    for (i = 0; i < 2; i++)
+        if (radios[i]) {
+            DeleteObject(radios[i]);
+            radios[i] = NULL;
+        }
+}
+
 LRESULT CALLBACK __export SkinDialogProc(HWND w, UINT msg, WPARAM wp, LPARAM lp);
 LRESULT CALLBACK __export SkinButtonProc(HWND w, UINT msg, WPARAM wp, LPARAM lp);
 LRESULT CALLBACK __export SkinComboProc(HWND w, UINT msg, WPARAM wp, LPARAM lp);
@@ -82,8 +108,8 @@ static HBITMAP RadioBitmap(BOOL checked)
             long dx = 2 * x - 11, dy = 2 * y - 11, d = dx * dx + dy * dy;   /* (2r)^2 */
             BOOL topLeft = dx + dy < 0;
             COLORREF c = face;
-            if (d < 64)        c = (checked && d < 12) ? RGB(0, 0, 0) : GetSysColor(COLOR_WINDOW);
-            else if (d < 100)  c = topLeft ? RGB(0, 0, 0) : face;
+            if (d < 64)        c = GetSysColor(checked && d < 12 ? COLOR_WINDOWTEXT : COLOR_WINDOW);
+            else if (d < 100)  c = topLeft ? SkinColor(SC_DKSHADOW) : face;
             else if (d < 144)  c = topLeft ? GetSysColor(COLOR_BTNSHADOW) : GetSysColor(COLOR_BTNHIGHLIGHT);
             SetPixel(dc, x, y, c);
         }
@@ -100,7 +126,7 @@ static void PaintPush(HDC dc, HWND w, RECT *r)
 
     DrawSolidRect(dc, r, GetSysColor(COLOR_BTNFACE));
     if (pressed || isDefault) {
-        DrawFrame(dc, r, RGB(0, 0, 0), RGB(0, 0, 0));
+        DrawFrame(dc, r, SkinColor(SC_DKSHADOW), SkinColor(SC_DKSHADOW));
         InflateRect(&in, -1, -1);
     }
     if (pressed)
@@ -128,6 +154,7 @@ void SNSYSTEM_API SkinCheckBox(HDC dc, int x, int y, BOOL radio, int state, BOOL
     if (radio) {
         HDC mem = CreateCompatibleDC(dc);
         HBITMAP old;
+        FollowColors();
         if (!radios[state ? 1 : 0])
             radios[state ? 1 : 0] = RadioBitmap(state != 0);
         old = SelectObject(mem, radios[state ? 1 : 0]);
@@ -146,7 +173,7 @@ void SNSYSTEM_API SkinCheckBox(HDC dc, int x, int y, BOOL radio, int state, BOOL
         for (i = 0; i < 7; i++) {
             int ty = y0 + (i < 3 ? i + 2 : 6 - i);
             SetRect(&p, x0 + i, ty, x0 + i + 1, ty + 3);
-            DrawSolidRect(dc, &p, state == 2 ? GetSysColor(COLOR_BTNSHADOW) : RGB(0, 0, 0));
+            DrawSolidRect(dc, &p, GetSysColor(state == 2 ? COLOR_BTNSHADOW : COLOR_WINDOWTEXT));
         }
     }
 }
@@ -264,10 +291,10 @@ static BOOL ComboEdit(HWND w, RECT *r)
 }
 
 /* Windows 98's other raised edge, of scroll arrows and menus: light and
-   black outside, white and grey inside. r ends inside it. */
+   dark outside, white and grey inside. r ends inside it. */
 void SkinRaisedEdge(HDC dc, RECT *r)
 {
-    DrawFrame(dc, r, GetSysColor(COLOR_BTNFACE), RGB(0, 0, 0));
+    DrawFrame(dc, r, GetSysColor(COLOR_BTNFACE), SkinColor(SC_DKSHADOW));
     InflateRect(r, -1, -1);
     DrawFrame(dc, r, GetSysColor(COLOR_BTNHIGHLIGHT), GetSysColor(COLOR_BTNSHADOW));
     InflateRect(r, -1, -1);
@@ -300,7 +327,7 @@ static void PaintCombo(HWND w)
         RECT a;
         for (i = 0; i < 4; i++) {
             SetRect(&a, x + i, y + i, x + 7 - i, y + i + 1);
-            DrawSolidRect(dc, &a, IsWindowEnabled(w) ? RGB(0, 0, 0) : GetSysColor(COLOR_BTNSHADOW));
+            DrawSolidRect(dc, &a, GetSysColor(IsWindowEnabled(w) ? COLOR_BTNTEXT : COLOR_BTNSHADOW));
         }
     }
     ReleaseDC(w, dc);
@@ -349,13 +376,13 @@ static void PaintComboEdit(HWND e)
         SetRect(&l, r.left, r.top, r.right, r.top + 1);
         DrawSolidRect(dc, &l, GetSysColor(COLOR_BTNSHADOW));
         OffsetRect(&l, 0, 1);
-        DrawSolidRect(dc, &l, RGB(0, 0, 0));
+        DrawSolidRect(dc, &l, SkinColor(SC_DKSHADOW));
     }
     if (at.left <= 0) {
         SetRect(&l, r.left, r.top, r.left + 1, r.bottom - 1);
         DrawSolidRect(dc, &l, GetSysColor(COLOR_BTNSHADOW));
         SetRect(&l, r.left + 1, r.top + 1, r.left + 2, r.bottom - 2);
-        DrawSolidRect(dc, &l, RGB(0, 0, 0));
+        DrawSolidRect(dc, &l, SkinColor(SC_DKSHADOW));
     }
     ReleaseDC(e, dc);
 }
@@ -432,6 +459,7 @@ LRESULT CALLBACK __export SkinDialogProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CTLCOLOR:
         if (HIWORD(lp) == CTLCOLOR_EDIT || HIWORD(lp) == CTLCOLOR_LISTBOX)
             break;
+        FollowColors();
         SetBkColor((HDC)wp, GetSysColor(COLOR_BTNFACE));
         SetTextColor((HDC)wp, GetSysColor(COLOR_BTNTEXT));
         return (LRESULT)(UINT)faceBrush;
@@ -452,7 +480,8 @@ LRESULT CALLBACK __export SkinDialogProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 void SNSYSTEM_API SkinEdges(HWND dlg)
 {
-    FrameChildren(dlg);
+    if (SkinWanted(dlg))
+        FrameChildren(dlg);
 }
 
 /* Windows 98 controls for the children of a dialog (safe to repeat). */
@@ -461,8 +490,8 @@ void SNSYSTEM_API SkinControl(HWND c)
     char cls[16];
     LONG style = GetWindowLong(c, GWL_STYLE);
 
-    if (!faceBrush)
-        faceBrush = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+    if (!SkinWanted(c))
+        return;
     GetClassName(c, cls, sizeof cls);
     SendMessage(c, WM_SETFONT, (WPARAM)DrawFont(FALSE), 0L);
     if (!lstrcmpi(cls, "Button") && ButtonKind(c) != KIND_OTHER) {
@@ -507,8 +536,49 @@ static void SkinControls(HWND dlg)
 /* Gives an already initialized dialog and its controls the Windows 98 look. */
 void SNSYSTEM_API SkinDialog(HWND dlg)
 {
+    if (!SkinWanted(dlg))
+        return;
     SkinControls(dlg);
     SkinSubclass(dlg, SkinDialogProc);
     SetWindowPos(dlg, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     InvalidateRect(dlg, NULL, TRUE);
+}
+
+/* A control of another program back as it was: its procedure, its own
+   border (lists), the dialog's font. */
+static void ControlOff(HWND c, HFONT font)
+{
+    RECT r;
+
+    if (GetProp(c, FRAMED)) {
+        GetWindowRect(c, &r);
+        MapWindowPoints(NULL, GetParent(c), (POINT FAR *)&r, 2);
+        RemoveProp(c, FRAMED);
+        SetWindowLong(c, GWL_STYLE, GetWindowLong(c, GWL_STYLE) | WS_BORDER);
+        SetWindowPos(c, NULL, r.left - 1, r.top - 1, r.right - r.left + 2, r.bottom - r.top + 2,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    if (GetWindow(c, GW_CHILD))
+        SkinUnsubclass(GetWindow(c, GW_CHILD));         /* a combo box's edit */
+    SkinUnsubclass(c);
+    SendMessage(c, WM_SETFONT, (WPARAM)font, 0L);
+}
+
+/* The Windows 98 style off a window of another program and its controls
+   (HookSkinPrograms), repainted with its own. */
+void SkinWindowOff(HWND w)
+{
+    char cls[8];
+    HWND c;
+
+    GetClassName(w, cls, sizeof cls);
+    if (!lstrcmp(cls, "#32770"))
+        for (c = GetWindow(w, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
+            ControlOff(c, (HFONT)SendMessage(w, WM_GETFONT, 0, 0L));
+    for (c = GetWindow(w, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
+        if (GetProp(c, OLD_HI))                         /* a document window (MDI client's are deeper) */
+            SkinUnsubclass(c);
+    SkinUnsubclass(w);
+    SetWindowPos(w, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    RedrawWindow(w, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 }

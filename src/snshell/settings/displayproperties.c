@@ -1,9 +1,10 @@
 /*
  * Display Properties, as in Windows 98, on Windows 3.1's own settings:
- * Background (the wallpaper, centred or tiled: WIN.INI [Desktop]), Screen
+ * Background (the wallpaper and how it shows: wallpaper.c), Screen
  * Saver (SYSTEM.INI SCRNSAVE.EXE, WIN.INI ScreenSaveActive and
- * ScreenSaveTimeOut), Appearance (appearance.c) and Settings (the VBESVGA
- * driver's mode in SYSTEM.INI [vbesvga.drv], used once Windows restarts).
+ * ScreenSaveTimeOut), Appearance (appearance.c), Effects (animations, the
+ * Windows 98 style for every program: SNOWBALL.INI [Skin]) and Settings (the
+ * VBESVGA driver's mode in SYSTEM.INI [vbesvga.drv], used once Windows restarts).
  * Background, Screen Saver and Settings show the screen on Windows 98's
  * monitor. A page is written only if something on it changed.
  */
@@ -12,18 +13,14 @@
 #define PAGE_BACKGROUND 0
 #define PAGE_SAVER      1
 #define PAGE_APPEARANCE 2
-#define PAGE_SETTINGS   3
+#define PAGE_EFFECTS    3
+#define PAGE_SETTINGS   4
 #define MONITOR_W       184             /* Windows 98's monitor (IDB_MONITOR), */
 #define SCREEN_X        16              /* its screen */
 #define SCREEN_Y        17
 #define SCREEN_W        152
 #define SCREEN_H        112
-
-typedef struct {
-    HGLOBAL mem;                        /* the BMP file after its header */
-    int w, h;
-    DWORD bits;                         /* where the pixels start in mem */
-} PICTURE;
+#define READ_MS         10000           /* a picture not read by then shows no preview */
 
 static const struct { int w, h; } areas[] = { { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 1024 } };
 static const struct { int depth; LPCSTR name, ini; } depths[] = {
@@ -32,10 +29,13 @@ static const struct { int depth; LPCSTR name, ini; } depths[] = {
 };
 
 static HWND sheet;
-static BOOL changed[4];
+static BOOL changed[5];
 static PATHLIST walls, savers;          /* the lists' paths, by item data */
-static PICTURE wall;                    /* the wallpaper chosen, for the monitor */
+static DIB wall;                        /* the wallpaper chosen, for the monitor */
 static char wallShown[MAX_PATH];
+static int  wallStyle = -1;
+static BOOL reading, readAgain;         /* one is being read; a newer choice stops it */
+static DWORD readStart;
 
 /* ---- the monitor ---- */
 
@@ -50,105 +50,14 @@ static void ScreenRect(HWND dlg, RECT *r)
     r->bottom = r->top + SCREEN_H;
 }
 
-static void PictureFree(PICTURE *p)
-{
-    if (p->mem)
-        GlobalFree(p->mem);
-    _fmemset(p, 0, sizeof *p);
-}
-
-/* A Windows bitmap file, whole, in memory. */
-static BOOL PictureLoad(LPCSTR path, PICTURE *p)
-{
-    BITMAPFILEHEADER fh;
-    LPBITMAPINFOHEADER bi;
-    HFILE f;
-    LONG size;
-
-    PictureFree(p);
-    if ((f = DosOpenRead(path)) == HFILE_ERROR)
-        return FALSE;
-    size = _llseek(f, 0, 2) - sizeof fh;
-    _llseek(f, 0, 0);
-    if (_lread(f, &fh, sizeof fh) != sizeof fh || fh.bfType != 0x4D42 || size <= 0 ||
-        (p->mem = GlobalAlloc(GMEM_MOVEABLE, size)) == NULL) {
-        _lclose(f);
-        return FALSE;
-    }
-    bi = (LPBITMAPINFOHEADER)GlobalLock(p->mem);
-    _hread(f, (void __huge *)bi, size);
-    _lclose(f);
-    if (bi->biSize != sizeof(BITMAPINFOHEADER)) {   /* OS/2 bitmaps: not shown */
-        GlobalUnlock(p->mem);
-        PictureFree(p);
-        return FALSE;
-    }
-    p->w = (int)bi->biWidth;
-    p->h = (int)bi->biHeight;
-    p->bits = fh.bfOffBits - sizeof fh;
-    GlobalUnlock(p->mem);
-    return TRUE;
-}
-
-static void PictureDraw(HDC dc, PICTURE *p, int x, int y, int w, int h)
-{
-    LPBITMAPINFO bi = (LPBITMAPINFO)GlobalLock(p->mem);
-
-    StretchDIBits(dc, x, y, w, h, 0, 0, p->w, p->h, (char __huge *)bi + p->bits, bi, DIB_RGB_COLORS, SRCCOPY);
-    GlobalUnlock(p->mem);
-}
-
-/* The desktop as it would be, small: its colour and the wallpaper chosen. */
-static void PaintScreen(HDC dc, const RECT *s, BOOL tile)
-{
-    int scale = GetSystemMetrics(SM_CXSCREEN), w, h, x, y;
-
-    DrawSolidRect(dc, s, GetSysColor(COLOR_BACKGROUND));
-    if (!wall.mem)
-        return;
-    w = max(1, (int)((long)wall.w * (s->right - s->left) / scale));
-    h = max(1, (int)((long)wall.h * (s->right - s->left) / scale));
-    SaveDC(dc);
-    IntersectClipRect(dc, s->left, s->top, s->right, s->bottom);
-    SetStretchBltMode(dc, COLORONCOLOR);
-    if (tile) {
-        /* the picture scaled once, then copied across: the first row by
-           doubling what is filled, then the rows the same way (a tile per
-           StretchDIBits took seconds) */
-        int sw = s->right - s->left, sh = s->bottom - s->top;
-        HDC mem = CreateCompatibleDC(dc);
-        HBITMAP bmp = mem ? CreateCompatibleBitmap(dc, sw, sh) : NULL, old;
-        if (bmp) {
-            old = SelectObject(mem, bmp);
-            SetStretchBltMode(mem, COLORONCOLOR);
-            PictureDraw(mem, &wall, 0, 0, w, h);
-            for (x = w; x < sw; x *= 2)
-                BitBlt(mem, x, 0, min(x, sw - x), h, mem, 0, 0, SRCCOPY);
-            for (y = h; y < sh; y *= 2)
-                BitBlt(mem, 0, y, sw, min(y, sh - y), mem, 0, 0, SRCCOPY);
-            BitBlt(dc, s->left, s->top, sw, sh, mem, 0, 0, SRCCOPY);
-            SelectObject(mem, old);
-            DeleteObject(bmp);
-        } else {
-            for (y = s->top; y < s->bottom; y += h)
-                for (x = s->left; x < s->right; x += w)
-                    PictureDraw(dc, &wall, x, y, w, h);
-        }
-        if (mem)
-            DeleteDC(mem);
-    } else {
-        PictureDraw(dc, &wall, (s->left + s->right - w) / 2, (s->top + s->bottom - h) / 2, w, h);
-    }
-    RestoreDC(dc, -1);
-}
-
 static void PaintMonitor(HWND dlg, HDC dc)
 {
     RECT s;
 
     ScreenRect(dlg, &s);
     PaintBitmap(dc, s.left - SCREEN_X, s.top - SCREEN_Y, IDB_MONITOR);
-    PaintScreen(dc, &s, SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_GETCURSEL, 0, 0L) == 1);
+    DisplayPropertiesDesktop(dc, &s, GetSysColor(COLOR_BACKGROUND), &wall,
+                             SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_GETCURSEL, 0, 0L) == WP_TILE);
 }
 
 static void RepaintMonitor(HWND dlg)
@@ -165,12 +74,8 @@ static void RepaintMonitor(HWND dlg)
 
 static void ItemPath(PATHLIST *l, DWORD i, LPSTR out)
 {
-    LPSTR p = PathListLock(l);
-
-    for (; *p && i > 0 && i != NONE; i--)
-        p = PathListNext(p);
-    lstrcpy(out, i == NONE ? "" : p);
-    PathListUnlock(l);
+    if (i == NONE || !PathListAt(l, (int)i, out))
+        *out = '\0';
 }
 
 static void Changed(HWND dlg, int page)
@@ -195,19 +100,53 @@ static int AddWallpaper(HWND dlg, LPCSTR path)
     return i;
 }
 
+static BOOL ReadingGoesOn(int percent)
+{
+    (void)percent;
+    return MessageLoopPump(sheet) && !readAgain && GetTickCount() - readStart < READ_MS;
+}
+
+/* A large picture takes a while: the page stays in use meanwhile, and what
+   is chosen in it stops the reading and starts the next. */
 static void ShowWallpaper(HWND dlg)
 {
     char path[MAX_PATH];
-    int i = (int)SendDlgItemMessage(dlg, IDC_BG_LIST, LB_GETCURSEL, 0, 0L);
+    DIB  next;
+    int  i, style;
 
-    path[0] = '\0';
-    if (i >= 0)
-        ItemPath(&walls, SendDlgItemMessage(dlg, IDC_BG_LIST, LB_GETITEMDATA, i, 0L), path);
-    if (lstrcmpi(path, wallShown)) {
-        lstrcpy(wallShown, path);
-        if (!*path || !PictureLoad(path, &wall))
-            PictureFree(&wall);
+    if (reading) {
+        readAgain = TRUE;
+        return;
     }
+    reading = TRUE;
+    do {
+        readAgain = FALSE;
+        i = (int)SendDlgItemMessage(dlg, IDC_BG_LIST, LB_GETCURSEL, 0, 0L);
+        style = (int)SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_GETCURSEL, 0, 0L);
+        path[0] = '\0';
+        if (i >= 0)
+            ItemPath(&walls, SendDlgItemMessage(dlg, IDC_BG_LIST, LB_GETITEMDATA, i, 0L), path);
+        if (lstrcmpi(path, wallShown) || style != wallStyle) {
+            _fmemset(&next, 0, sizeof next);
+            readStart = GetTickCount();
+            if (*path)
+                WallpaperPreview(path, style, SCREEN_W, ReadingGoesOn, &next);
+            if (!IsWindow(dlg)) {
+                DibFree(&next);
+                reading = FALSE;
+                return;
+            }
+            if (readAgain) {
+                DibFree(&next);
+            } else {
+                DibFree(&wall);
+                wall = next;
+                lstrcpy(wallShown, path);
+                wallStyle = style;
+            }
+        }
+    } while (readAgain);
+    reading = FALSE;
     RepaintMonitor(dlg);
 }
 
@@ -228,40 +167,36 @@ static void SelectWallpaper(HWND dlg, LPCSTR path)
 
 static void InitBackground(HWND dlg)
 {
+    static const char *const kinds[] = { "*.BMP", "*.JPG", "*.JPEG", "*.PNG" };
     char dir[MAX_PATH], spec[MAX_PATH], path[MAX_PATH], now[MAX_PATH];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
-    int i;
+    int i, k, style;
 
     PathListInit(&walls);
     i = (int)SendDlgItemMessage(dlg, IDC_BG_LIST, LB_ADDSTRING, 0, (LPARAM)(LPSTR)"(None)");
     SendDlgItemMessage(dlg, IDC_BG_LIST, LB_SETITEMDATA, i, NONE);
     GetWindowsDirectory(dir, sizeof dir);
-    lstrcpy(spec, dir);
-    PathAppend(spec, "*.BMP");
-    if (DosFindFirst(spec, &f, &e)) {
-        do {
-            lstrcpy(path, dir);
-            PathAppend(path, e.name);
-            AddWallpaper(dlg, path);
-        } while (DosFindNext(&f, &e));
-        DosFindClose(&f);
-    }
-    GetProfileString("Desktop", "Wallpaper", "(None)", now, sizeof now);
-    if (!lstrcmpi(now, "(None)") || !*now) {
-        SendDlgItemMessage(dlg, IDC_BG_LIST, LB_SETCURSEL, 0, 0L);
-    } else {
-        if (!_fstrchr(now, '\\')) {     /* a name: in the Windows folder */
-            lstrcpy(path, dir);
-            PathAppend(path, now);
-            lstrcpy(now, path);
+    for (k = 0; k < sizeof kinds / sizeof kinds[0]; k++) {
+        lstrcpy(spec, dir);
+        PathAppend(spec, kinds[k]);
+        if (DosFindFirst(spec, &f, &e)) {
+            do {
+                lstrcpy(path, dir);
+                PathAppend(path, e.name);
+                AddWallpaper(dlg, path);
+            } while (DosFindNext(&f, &e));
+            DosFindClose(&f);
         }
-        SelectWallpaper(dlg, now);
     }
-    SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"Center");
-    SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"Tile");
-    SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_SETCURSEL, GetProfileInt("Desktop", "TileWallpaper", 0) ? 1 : 0, 0L);
-    ShowWallpaper(dlg);
+    style = WallpaperNow(now);
+    if (*now)
+        SelectWallpaper(dlg, now);
+    else
+        SendDlgItemMessage(dlg, IDC_BG_LIST, LB_SETCURSEL, 0, 0L);
+    WallpaperStyles(GetDlgItem(dlg, IDC_BG_STYLE));
+    SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_SETCURSEL, style, 0L);
+    PostMessage(dlg, WM_COMMAND, IDC_BG_STYLE, MAKELPARAM(0, CBN_SELENDOK));    /* once the sheet is up */
 }
 
 static void ApplyBackground(HWND dlg)
@@ -272,12 +207,11 @@ static void ApplyBackground(HWND dlg)
     path[0] = '\0';
     if (i >= 0)
         ItemPath(&walls, SendDlgItemMessage(dlg, IDC_BG_LIST, LB_GETITEMDATA, i, 0L), path);
-    if (*path)
-        DosShortPath(path, path);
-    WriteProfileString("Desktop", "TileWallpaper",
-                       SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_GETCURSEL, 0, 0L) == 1 ? "1" : "0");
-    SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, *path ? (LPSTR)path : (LPSTR)"(None)", SPIF_UPDATEINIFILE);
-    DesktopRepaint();
+    if (reading)
+        readAgain = TRUE;
+    WallpaperApply(dlg, path, (int)SendDlgItemMessage(dlg, IDC_BG_STYLE, CB_GETCURSEL, 0, 0L));
+    wallStyle = -1;                     /* the monitor from what was made */
+    ShowWallpaper(dlg);
 }
 
 /* ---- Screen Saver ---- */
@@ -287,7 +221,7 @@ static void ApplyBackground(HWND dlg)
 static void SaverName(LPCSTR path, LPSTR out)
 {
     BYTE head[64], len;
-    char text[128];
+    char text[256];                     /* len is a byte */
     LPSTR p;
     HFILE f;
     DWORD names;
@@ -312,10 +246,10 @@ static void SaverName(LPCSTR path, LPSTR out)
     _lclose(f);
 }
 
-static void AddSavers(HWND dlg, LPCSTR dir)
+static void AddSavers(HWND combo, PATHLIST *l, LPCSTR dir)
 {
     char spec[MAX_PATH], path[MAX_PATH], name[128];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
     int i;
 
@@ -326,12 +260,28 @@ static void AddSavers(HWND dlg, LPCSTR dir)
             lstrcpy(path, dir);
             PathAppend(path, e.name);
             SaverName(path, name);
-            i = (int)SendDlgItemMessage(dlg, IDC_SS_LIST, CB_ADDSTRING, 0, (LPARAM)(LPSTR)name);
-            SendDlgItemMessage(dlg, IDC_SS_LIST, CB_SETITEMDATA, i, savers.count);
-            PathListAdd(&savers, path);
+            i = (int)SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)(LPSTR)name);
+            SendMessage(combo, CB_SETITEMDATA, i, l->count);
+            PathListAdd(l, path);
         } while (DosFindNext(&f, &e));
         DosFindClose(&f);
     }
+}
+
+/* "(None)" and every screen saver of Windows' folders into a combo box,
+   the paths into l (item data: the place in l, NONE for none). */
+void DisplayPropertiesSavers(HWND combo, PATHLIST *l)
+{
+    char dir[MAX_PATH];
+    int i;
+
+    PathListInit(l);
+    i = (int)SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"(None)");
+    SendMessage(combo, CB_SETITEMDATA, i, NONE);
+    GetWindowsDirectory(dir, sizeof dir);
+    AddSavers(combo, l, dir);
+    GetSystemDirectory(dir, sizeof dir);
+    AddSavers(combo, l, dir);
 }
 
 static BOOL SaverChosen(HWND dlg, LPSTR path)
@@ -356,16 +306,10 @@ static void SaverButtons(HWND dlg)
 
 static void InitSaver(HWND dlg)
 {
-    char dir[MAX_PATH], now[MAX_PATH], item[MAX_PATH];
+    char now[MAX_PATH], item[MAX_PATH];
     int i, n, sel;
 
-    PathListInit(&savers);
-    i = (int)SendDlgItemMessage(dlg, IDC_SS_LIST, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"(None)");
-    SendDlgItemMessage(dlg, IDC_SS_LIST, CB_SETITEMDATA, i, NONE);
-    GetWindowsDirectory(dir, sizeof dir);
-    AddSavers(dlg, dir);
-    GetSystemDirectory(dir, sizeof dir);
-    AddSavers(dlg, dir);
+    DisplayPropertiesSavers(GetDlgItem(dlg, IDC_SS_LIST), &savers);
     GetPrivateProfileString("boot", "SCRNSAVE.EXE", "", now, sizeof now, "SYSTEM.INI");
     n = (int)SendDlgItemMessage(dlg, IDC_SS_LIST, CB_GETCOUNT, 0, 0L);
     for (i = 1, sel = 0; i < n && *now && GetProfileInt("windows", "ScreenSaveActive", 0); i++) {
@@ -464,6 +408,14 @@ static void InitSettings(HWND dlg)
     ShowArea(dlg);
 }
 
+static void AskRestart(HWND dlg)
+{
+    if (MessageBox(dlg, "You must restart Windows before the new settings will take effect.\n\n"
+                        "Do you want to restart Windows now?", "System Settings Change",
+                   MB_ICONQUESTION | MB_YESNO) == IDYES)
+        ExitWindows(EW_RESTARTWINDOWS, 0);
+}
+
 /* Written for the driver; it takes them when Windows starts again. */
 static void ApplySettings(HWND dlg)
 {
@@ -482,10 +434,36 @@ static void ApplySettings(HWND dlg)
     wsprintf(text, "Modern SVGA %dx%d %s Small", areas[a].w, areas[a].h, (LPSTR)depths[d].ini);
     WritePrivateProfileString("boot.description", "display.drv", text, "SYSTEM.INI");
     SetDlgItemText(dlg, IDC_ST_DISPLAY, text);
-    if (MessageBox(dlg, "You must restart Windows before the new settings will take effect.\n\n"
-                        "Do you want to restart Windows now?", "System Settings Change",
-                   MB_ICONQUESTION | MB_YESNO) == IDYES)
-        ExitWindows(EW_RESTARTWINDOWS, 0);
+    AskRestart(dlg);
+}
+
+/* ---- Effects ---- */
+
+/* The Windows 98 style for Snowball's windows, and with it perhaps every program's. */
+static void InitEffects(HWND dlg)
+{
+    BOOL shell = SettingsGetInt("Skin", "Shell", 1);
+
+    CheckDlgButton(dlg, IDC_EF_ANIMATE, DrawAnimations());
+    CheckDlgButton(dlg, IDC_EF_SHELL, shell);
+    CheckDlgButton(dlg, IDC_EF_SKIN, SettingsGetInt("Skin", "AllPrograms", 1));
+    EnableWindow(GetDlgItem(dlg, IDC_EF_SKIN), shell);
+    ExtendersInit(dlg);
+}
+
+static void ApplyEffects(HWND dlg)
+{
+    BOOL animate = IsDlgButtonChecked(dlg, IDC_EF_ANIMATE), skin = IsDlgButtonChecked(dlg, IDC_EF_SKIN);
+    BOOL shell = IsDlgButtonChecked(dlg, IDC_EF_SHELL);
+
+    SettingsSetInt("Skin", "Animate", animate);
+    SettingsSetInt("Skin", "Shell", shell);
+    SettingsSetInt("Skin", "AllPrograms", skin);
+    DrawSetAnimations(animate);
+    HookSkinPrograms(shell && skin);
+    HookSkinShell(shell);
+    if (ExtendersApply(dlg))
+        AskRestart(dlg);
 }
 
 /* ---- the sheet ---- */
@@ -503,6 +481,8 @@ static void Apply(HWND dlg)
         ApplySaver(dlg);
     if (changed[PAGE_APPEARANCE])
         AppearanceApply(dlg);
+    if (changed[PAGE_EFFECTS])
+        ApplyEffects(dlg);
     if (changed[PAGE_SETTINGS])
         ApplySettings(dlg);
     _fmemset(changed, 0, sizeof changed);
@@ -519,10 +499,12 @@ BOOL CALLBACK __export DisplayPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         TabsAdd(GetDlgItem(dlg, IDC_TABS), "Background");
         TabsAdd(GetDlgItem(dlg, IDC_TABS), "Screen Saver");
         TabsAdd(GetDlgItem(dlg, IDC_TABS), "Appearance");
+        TabsAdd(GetDlgItem(dlg, IDC_TABS), "Effects");
         TabsAdd(GetDlgItem(dlg, IDC_TABS), "Settings");
         InitBackground(dlg);
         InitSaver(dlg);
         AppearanceInit(dlg);
+        InitEffects(dlg);
         InitSettings(dlg);
         _fmemset(changed, 0, sizeof changed);
         EnableWindow(GetDlgItem(dlg, IDC_APPLY), FALSE);
@@ -538,7 +520,7 @@ BOOL CALLBACK __export DisplayPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         BeginPaint(dlg, &ps);
         if (Page(dlg) == PAGE_APPEARANCE)
             AppearancePaint(dlg, ps.hdc);
-        else
+        else if (Page(dlg) != PAGE_EFFECTS)
             PaintMonitor(dlg, ps.hdc);
         EndPaint(dlg, &ps);
         return TRUE;
@@ -553,17 +535,20 @@ BOOL CALLBACK __export DisplayPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         case IDC_BG_LIST:
         case IDC_BG_STYLE:
             if (HIWORD(lp) == LBN_SELCHANGE || HIWORD(lp) == CBN_SELCHANGE) {
-                ShowWallpaper(dlg);
                 Changed(dlg, PAGE_BACKGROUND);
+                ShowWallpaper(dlg);
+            } else if (HIWORD(lp) == CBN_SELENDOK) {
+                ShowWallpaper(dlg);
             }
             break;
         case IDC_BG_BROWSE:
             {
                 char file[MAX_PATH] = "";
-                if (BrowseDialogShow(dlg, "Browse", "Bitmap Files (*.bmp)\0*.bmp\0All Files\0*.*\0", file, TRUE)) {
+                if (BrowseDialogShow(dlg, "Browse", "Pictures (*.bmp;*.jpg;*.jpeg;*.png)\0*.bmp;*.jpg;*.jpeg;*.png\0"
+                                     "All Files\0*.*\0", file, TRUE)) {
                     SelectWallpaper(dlg, file);
-                    ShowWallpaper(dlg);
                     Changed(dlg, PAGE_BACKGROUND);
+                    ShowWallpaper(dlg);
                 }
             }
             break;
@@ -583,6 +568,14 @@ BOOL CALLBACK __export DisplayPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         case IDC_SS_PREVIEW:
             RunSaver(dlg, "/s");
             break;
+        case IDC_EF_SHELL:
+            EnableWindow(GetDlgItem(dlg, IDC_EF_SKIN), IsDlgButtonChecked(dlg, IDC_EF_SHELL));
+            /* fall through */
+        case IDC_EF_ANIMATE:
+        case IDC_EF_SKIN:
+        case IDC_EF_RESOURCES:
+            Changed(dlg, PAGE_EFFECTS);
+            break;
         case IDC_ST_COLORS:
             if (HIWORD(lp) == CBN_SELCHANGE)
                 Changed(dlg, PAGE_SETTINGS);
@@ -600,8 +593,10 @@ BOOL CALLBACK __export DisplayPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         MessageLoopTrackDialog(dlg, FALSE);
         PathListFree(&walls);
         PathListFree(&savers);
-        PictureFree(&wall);
+        DibFree(&wall);
         wallShown[0] = '\0';
+        wallStyle = -1;
+        readAgain = TRUE;
         sheet = NULL;
         return TRUE;
     }

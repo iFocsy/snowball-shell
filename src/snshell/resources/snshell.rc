@@ -33,19 +33,19 @@ BEGIN
 END
 
 /* The banner (IDC_ABOUT_BANNER's place) and the line above the memory are painted by aboutdialog.c */
-IDD_ABOUT DIALOG 0, 0, 250, 172
+IDD_ABOUT DIALOG 0, 0, 250, 182
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "About Snowball"
 FONT 8, "MS Sans Serif"
 BEGIN
     LTEXT           "", IDC_ABOUT_BANNER, 0, 0, 250, 36
-    LTEXT           "", IDC_VERSION, 12, 44, 226, 8
-    LTEXT           "A Windows 98 style shell for Windows 3.1 and 3.11: a reimplementation of Calmira, reworked from scratch in C.", -1, 12, 56, 226, 18
-    LTEXT           "Copyright (C) 2026 iFocsy", -1, 12, 80, 226, 8
-    LTEXT           "github.com/iFocsy/snowball-shell", IDC_ABOUT_LINK, 12, 90, 226, 8
-    LTEXT           "Inspired by Calmira. Icon from Calmira (GPL). Free software under the GNU GPL 2.", -1, 12, 104, 226, 16
-    LTEXT           "", IDC_INFO, 12, 130, 160, 18
-    DEFPUSHBUTTON   "OK", IDOK, 188, 150, 50, 14
+    LTEXT           "", IDC_VERSION, 12, 44, 226, 18, SS_NOPREFIX
+    LTEXT           "A Windows 98 style shell for Windows 3.1 and 3.11: a reimplementation of Calmira, reworked from scratch in C.", -1, 12, 66, 226, 18
+    LTEXT           "Copyright (C) 2026 iFocsy", -1, 12, 90, 226, 8
+    LTEXT           "github.com/iFocsy/snowball-shell", IDC_ABOUT_LINK, 12, 100, 226, 8
+    LTEXT           "Inspired by Calmira. Icon from Calmira (GPL). Free software under the GNU GPL 3.", -1, 12, 114, 226, 16
+    LTEXT           "", IDC_INFO, 12, 140, 160, 18
+    DEFPUSHBUTTON   "OK", IDOK, 188, 160, 50, 14
 END
 
 /* Everything but Cancel is painted by progress.c (layout in ProgressProc) */
@@ -185,7 +185,8 @@ BEGIN
     RTEXT           "", IDC_DRIVE_CAP, 76, 133, 84, 8
     RTEXT           "", IDC_DRIVE_CAPS, 164, 133, 46, 8
     CONTROL         "", IDC_DRIVE_PIE, "Static", WS_CHILD, 62, 150, 100, 50
-    CTEXT           "", IDC_DRIVE_DRIVE, 62, 206, 100, 8
+    PUSHBUTTON      "Disk Cl&eanup...", IDC_DRIVE_CLEANUP, 152, 200, 62, 14
+    CTEXT           "", IDC_DRIVE_DRIVE, 72, 206, 80, 8
     SHEET_BUTTONS
 END
 
@@ -200,7 +201,7 @@ BEGIN
     LTEXT           "", IDC_COMPUTER_SYSTEM, 110, 46, 100, 8
     LTEXT           "", IDC_COMPUTER_VERSION, 110, 56, 100, 8
     LTEXT           "Shell:", IDC_PROPS_LABEL, 100, 76, 110, 8
-    LTEXT           "", IDC_COMPUTER_SHELL, 110, 88, 100, 8
+    LTEXT           "", IDC_COMPUTER_SHELL, 110, 88, 110, 18, SS_NOPREFIX
     LTEXT           "Computer:", IDC_PROPS_LABEL, 100, 118, 110, 8
     LTEXT           "", IDC_COMPUTER_CPU, 110, 130, 100, 8
     LTEXT           "", IDC_COMPUTER_MODE, 110, 140, 100, 8
@@ -346,7 +347,7 @@ BEGIN
     LISTBOX         IDC_BG_LIST, 14, 143, 140, 70, LBS_SORT | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
     PUSHBUTTON      "&Browse...", IDC_BG_BROWSE, 162, 143, 76, 14
     LTEXT           "Dis&play:", IDC_BG_STYLEL, 162, 176, 76, 8
-    COMBOBOX        IDC_BG_STYLE, 162, 187, 76, 40, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_BG_STYLE, 162, 187, 76, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     GROUPBOX        "&Screen Saver", IDC_SS_GROUP, 14, 132, 224, 70
     COMBOBOX        IDC_SS_LIST, 22, 146, 112, 90, CBS_DROPDOWNLIST | CBS_SORT | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "Se&ttings...", IDC_SS_SETTINGS, 140, 145, 46, 14
@@ -359,11 +360,21 @@ BEGIN
     PUSHBUTTON      "Sa&ve As...", IDC_AP_SAVE, 160, 150, 40, 14
     PUSHBUTTON      "&Delete", IDC_AP_DELETE, 204, 150, 34, 14
     LTEXT           "&Item:", IDC_AP_ITEML, 14, 172, 120, 8
-    COMBOBOX        IDC_AP_ITEM, 14, 183, 140, 90, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Co&lor:", IDC_AP_COLORL, 160, 172, 36, 8
-    CONTROL         "", IDC_AP_COLOR, "Button", BS_OWNERDRAW | WS_TABSTOP, 160, 182, 36, 14
+    COMBOBOX        IDC_AP_ITEM, 14, 183, 98, 90, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Co&lor:", IDC_AP_COLORL, 118, 172, 36, 8
+    CONTROL         "", IDC_AP_COLOR, "Button", BS_OWNERDRAW | WS_TABSTOP, 118, 182, 36, 14
+    LTEXT           "Color &2:", IDC_AP_COLOR2L, 160, 172, 36, 8
+    CONTROL         "", IDC_AP_COLOR2, "Button", BS_OWNERDRAW | WS_TABSTOP, 160, 182, 36, 14
     LTEXT           "&Font color:", IDC_AP_TEXTL, 202, 172, 40, 8
     CONTROL         "", IDC_AP_TEXT, "Button", BS_OWNERDRAW | WS_TABSTOP, 202, 182, 36, 14
+    PUSHBUTTON      "T&heme Manager...", IDC_AP_THEMES, 14, 202, 76, 14
+    GROUPBOX        "Visual effects", IDC_EF_GROUP, 14, 28, 224, 60
+    CONTROL         "&Animate windows and the taskbar", IDC_EF_ANIMATE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 22, 42, 200, 10
+    CONTROL         "Use the &Windows 98 style for Snowball", IDC_EF_SHELL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 22, 56, 200, 10
+    CONTROL         "Use the Windows 98 style for other &programs", IDC_EF_SKIN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 34, 70, 188, 10
+    GROUPBOX        "System resources", IDC_EF_RESGROUP, 14, 94, 224, 54
+    CONTROL         "&Enable USER and GDI resource extensions", IDC_EF_RESOURCES, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 22, 108, 200, 10
+    LTEXT           "", IDC_EF_RESNOTE, 22, 122, 208, 20, SS_NOPREFIX
     LTEXT           "Display:", IDC_ST_DISPLAYL, 14, 130, 224, 8
     LTEXT           "", IDC_ST_DISPLAY, 14, 140, 224, 8, SS_NOPREFIX
     GROUPBOX        "&Colors", IDC_ST_COLORSG, 14, 156, 108, 48
@@ -412,6 +423,80 @@ BEGIN
     PUSHBUTTON      "&Help", IDC_OPENSAVE_HELP, 223, 160, 50, 14
 END
 
+IDD_THEMES DIALOG 0, 0, 344, 256
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+CAPTION "Theme Manager"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "&Themes:", IDC_TM_LISTL, 7, 7, 60, 8
+    LISTBOX         IDC_TM_LIST, 7, 18, 116, 166, LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    PUSHBUTTON      "&New...", IDC_TM_NEW, 7, 188, 56, 14
+    PUSHBUTTON      "&Copy...", IDC_TM_COPY, 67, 188, 56, 14
+    PUSHBUTTON      "Rena&me...", IDC_TM_RENAME, 7, 204, 56, 14
+    PUSHBUTTON      "&Delete", IDC_TM_DELETE, 67, 204, 56, 14
+    PUSHBUTTON      "&Group...", IDC_TM_GROUP, 7, 220, 56, 14
+    PUSHBUTTON      "&Import...", IDC_TM_IMPORT, 67, 220, 56, 14
+    PUSHBUTTON      "E&xport...", IDC_TM_EXPORT, 7, 236, 56, 14
+    PUSHBUTTON      "Restore De&faults", IDC_TM_DEFAULTS, 67, 236, 56, 14
+    CONTROL         "", IDC_TABS, "SbTabs", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 130, 7, 207, 176
+    LTEXT           "", IDC_TM_PICTURE, 138, 26, 191, 128
+    LTEXT           "", IDC_TM_SUMMARY, 138, 158, 191, 18, SS_NOPREFIX
+    CONTROL         "This theme sets the colors", IDC_TM_HASCOLORS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 26, 190, 10
+    LISTBOX         IDC_TM_COLORLIST, 138, 40, 191, 116, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    LTEXT           "Double-click a color to change it.", IDC_TM_COLORHINT, 138, 163, 130, 8
+    PUSHBUTTON      "C&hange...", IDC_TM_CHANGE, 273, 160, 56, 14
+    CONTROL         "This theme sets the wallpaper", IDC_TM_HASWALL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 26, 190, 10
+    LTEXT           "", IDC_TM_WALLNAME, 150, 40, 179, 8, SS_NOPREFIX
+    PUSHBUTTON      "B&rowse...", IDC_TM_WALLBROWSE, 150, 52, 50, 14
+    PUSHBUTTON      "(None)", IDC_TM_WALLNONE, 204, 52, 44, 14
+    COMBOBOX        IDC_TM_WALLSTYLE, 254, 53, 60, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "This theme sets the screen saver", IDC_TM_HASSAVER, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 74, 190, 10
+    COMBOBOX        IDC_TM_SAVER, 150, 87, 140, 90, CBS_DROPDOWNLIST | CBS_SORT | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "This theme sets the desktop icons", IDC_TM_HASICONS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 108, 190, 10
+    LISTBOX         IDC_TM_ICONLIST, 150, 121, 118, 54, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_TABSTOP | WS_BORDER
+    PUSHBUTTON      "C&hange Icon...", IDC_TM_ICONCHANGE, 274, 121, 55, 14
+    PUSHBUTTON      "Default", IDC_TM_ICONDEFAULT, 274, 139, 55, 14
+    CONTROL         "This theme sets the sounds", IDC_TM_HASSOUNDS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 26, 190, 10
+    LISTBOX         IDC_TM_SOUNDLIST, 138, 40, 191, 116, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    PUSHBUTTON      "B&rowse...", IDC_TM_SOUNDBROWSE, 138, 160, 50, 14
+    PUSHBUTTON      "Pla&y", IDC_TM_SOUNDPLAY, 192, 160, 44, 14
+    PUSHBUTTON      "(None)", IDC_TM_SOUNDNONE, 240, 160, 44, 14
+    CONTROL         "This theme sets the mouse pointers", IDC_TM_HASPOINTERS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 26, 190, 10
+    LISTBOX         IDC_TM_POINTERLIST, 138, 40, 191, 116, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    PUSHBUTTON      "B&rowse...", IDC_TM_POINTERBROWSE, 138, 160, 50, 14
+    PUSHBUTTON      "Default", IDC_TM_POINTERDEFAULT, 192, 160, 50, 14
+    GROUPBOX        "Apply these parts of the theme", IDC_TM_PARTS, 130, 188, 207, 40
+    CONTROL         "Co&lors", IDC_TM_PART, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 200, 62, 10
+    CONTROL         "&Wallpaper", IDC_TM_PART + 1, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 204, 200, 62, 10
+    CONTROL         "&Screen saver", IDC_TM_PART + 2, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 270, 200, 62, 10
+    CONTROL         "S&ounds", IDC_TM_PART + 3, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 138, 213, 62, 10
+    CONTROL         "Mouse &pointers", IDC_TM_PART + 4, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 204, 213, 62, 10
+    CONTROL         "Des&ktop icons", IDC_TM_PART + 5, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 270, 213, 62, 10
+    DEFPUSHBUTTON   "OK", IDOK, 177, 236, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 232, 236, 50, 14
+    PUSHBUTTON      "&Apply", IDC_APPLY, 287, 236, 50, 14
+END
+
+IDD_STARTSIZE DIALOG 0, 0, 236, 154
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Customize Start Menu"
+FONT 8, "MS Sans Serif"
+BEGIN
+    GROUPBOX        "Programs", -1, 7, 7, 222, 78
+    ICON            IDI_SNOWBALL, IDC_SMC_ICON, 15, 20, 20, 20
+    LTEXT           "The Start menu contains shortcuts to the programs you use most often. Clearing the list of shortcuts does not delete the programs.", -1, 44, 20, 178, 26
+    LTEXT           "&Number of programs on Start menu:", -1, 44, 52, 120, 8
+    COMBOBOX        IDC_SMC_COUNT, 166, 50, 30, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "&Clear List", IDC_SMC_CLEAR, 166, 66, 56, 14
+    GROUPBOX        "Size", -1, 7, 90, 222, 38
+    LTEXT           "&Width:", -1, 15, 106, 26, 8
+    LTEXT           "Narrow", -1, 44, 106, 28, 8
+    CONTROL         "", IDC_SMC_WIDTH, "SbSlider", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 74, 102, 112, 16
+    LTEXT           "Wide", -1, 190, 106, 30, 8
+    DEFPUSHBUTTON   "OK", IDOK, 124, 134, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 179, 134, 50, 14
+END
+
 IDD_TBPROPS DIALOG 0, 0, 252, 228
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Taskbar Properties"
@@ -421,20 +506,24 @@ BEGIN
     LTEXT           "", IDC_TASKBAR_PREVIEW, 14, 26, 224, 96
     CONTROL         "&Always on top", IDC_TASKBAR_ONTOP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 130, 120, 10
     CONTROL         "A&uto hide", IDC_TASKBAR_AUTOHIDE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 144, 120, 10
-    CONTROL         "Show &small icons in Start menu", IDC_TASKBAR_SMALL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 158, 150, 10
+    CONTROL         "Show &small icons in Start menu", IDC_TASKBAR_SMALL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 158, 122, 10
     CONTROL         "Show &Clock", IDC_TASKBAR_CLOCK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 14, 172, 120, 10
     CONTROL         "Show &24-hour clock", IDC_TASKBAR_24HOUR, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 26, 186, 120, 10
     CONTROL         "Show &icons only", IDC_TASKBAR_ICONSONLY, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 140, 130, 98, 10
     CONTROL         "&Group similar buttons", IDC_TASKBAR_GROUPED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 140, 144, 98, 10
-    GROUPBOX        "Customize Start menu", IDC_TASKBAR_GROUP, 14, 26, 224, 86
+    CONTROL         "T&wo-column Start menu", IDC_TASKBAR_COLUMNS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 140, 158, 98, 10
+    PUSHBUTTON      "Customi&ze...", IDC_TASKBAR_CUSTOMIZE, 152, 171, 64, 14
+    GROUPBOX        "Customize Start menu", IDC_TASKBAR_GROUP, 14, 26, 224, 108
     ICON            IDI_SNOWBALL, IDC_TASKBAR_ICON, 24, 44, 20, 20
     LTEXT           "You can customize your Start menu by adding or removing items from it.", IDC_TASKBAR_TEXT, 56, 44, 172, 20
     PUSHBUTTON      "&Add...", IDC_TASKBAR_ADD, 56, 88, 52, 14
     PUSHBUTTON      "&Remove...", IDC_TASKBAR_REMOVE, 114, 88, 52, 14
     PUSHBUTTON      "A&dvanced...", IDC_TASKBAR_ADVANCED, 172, 88, 56, 14
-    GROUPBOX        "Documents menu", IDC_TASKBAR_DOCGROUP, 14, 120, 224, 60
-    LTEXT           "Click the Clear button to remove the contents of the Documents menu.", IDC_TASKBAR_DOCTEXT, 24, 138, 140, 24
-    PUSHBUTTON      "&Clear", IDC_TASKBAR_CLEAR, 176, 142, 52, 14
+    LTEXT           "Bring in programs added to Program Manager since the last sync.", IDC_TASKBAR_SYNCTEXT, 56, 110, 110, 16
+    PUSHBUTTON      "&Sync", IDC_TASKBAR_SYNC, 172, 110, 56, 14
+    GROUPBOX        "Documents menu", IDC_TASKBAR_DOCGROUP, 14, 140, 224, 56
+    LTEXT           "Click the Clear button to remove the contents of the Documents menu.", IDC_TASKBAR_DOCTEXT, 24, 156, 140, 24
+    PUSHBUTTON      "&Clear", IDC_TASKBAR_CLEAR, 176, 160, 52, 14
     GROUPBOX        "Programs by the clock", IDC_TRAY_GROUP, 14, 26, 224, 84
     LTEXT           "These show as icons by the clock instead of as taskbar buttons. Click one to start or show the program.", IDC_TRAY_TEXT, 24, 38, 204, 16
     LISTBOX         IDC_TRAY_LIST, 24, 58, 140, 44, LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
@@ -493,8 +582,18 @@ BEGIN
                     BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 24, 42, 200, 10
     CONTROL         "Open each folder in its &own window", IDC_FOLDEROPTIONS_OWN, "Button",
                     BS_AUTORADIOBUTTON, 24, 58, 200, 10
-    LTEXT           "&Advanced settings:", IDC_FOLDEROPTIONS_LABEL, 14, 26, 120, 8
-    LISTBOX         IDC_FOLDEROPTIONS_LIST, 14, 37, 224, 136, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    GROUPBOX        "Click items as follows", IDC_FOLDEROPTIONS_CLICK, 14, 86, 224, 52
+    CONTROL         "S&ingle-click to open an item (point to select)", IDC_FOLDEROPTIONS_SINGLE, "Button",
+                    BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 24, 102, 200, 10
+    CONTROL         "&Double-click to open an item (single-click to select)", IDC_FOLDEROPTIONS_DOUBLE, "Button",
+                    BS_AUTORADIOBUTTON, 24, 118, 200, 10
+    GROUPBOX        "Folder views", IDC_FOLDEROPTIONS_VIEWS, 14, 26, 224, 48
+    ICON            IDI_SNOWBALL, IDC_FOLDEROPTIONS_VIEWICON, 22, 40, 20, 20
+    LTEXT           "You can make all your folders look the same.", IDC_FOLDEROPTIONS_VIEWTEXT, 52, 38, 180, 8
+    PUSHBUTTON      "Li&ke Current Folder", IDC_FOLDEROPTIONS_LIKE, 52, 52, 84, 14
+    PUSHBUTTON      "R&eset All Folders", IDC_FOLDEROPTIONS_RESET, 142, 52, 84, 14
+    LTEXT           "&Advanced settings:", IDC_FOLDEROPTIONS_LABEL, 14, 80, 120, 8
+    LISTBOX         IDC_FOLDEROPTIONS_LIST, 14, 91, 224, 80, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
     PUSHBUTTON      "&Restore Defaults", IDC_FOLDEROPTIONS_DEFAULTS, 158, 180, 80, 14
     LTEXT           "Registered file &types:", IDC_FILETYPES_LABEL, 14, 26, 120, 8
     LISTBOX         IDC_FILETYPES_LIST, 14, 37, 160, 86, LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_SORT | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
@@ -529,3 +628,96 @@ END
 #define VER_NAME        "SNSHELL\0"
 #define VER_FILE        "SNSHELL.DLL\0"
 #include "..\..\include\version.rc"
+
+IDD_VOLUME DIALOG 0, 0, 44, 96
+STYLE DS_MODALFRAME | WS_POPUP
+FONT 8, "MS Sans Serif"
+BEGIN
+    CTEXT           "Volume", -1, 0, 5, 44, 8
+    CONTROL         "", IDC_VOLUME_SLIDER, "SbSlider", WS_CHILD | WS_VISIBLE | WS_TABSTOP | SLS_VERTICAL, 14, 17, 16, 58
+    CONTROL         "&Mute", IDC_VOLUME_MUTE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 7, 80, 34, 10
+END
+
+IDD_RESMETER DIALOG 0, 0, 212, 80
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Resource Meter"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "System resources:", -1, 7, 9, 66, 8
+    CONTROL         "", IDC_RESMETER_BAR, "Static", SS_LEFT, 74, 7, 84, 11
+    LTEXT           "", IDC_RESMETER_FREE, 164, 9, 44, 8
+    LTEXT           "User resources:", -1, 7, 25, 66, 8
+    CONTROL         "", IDC_RESMETER_BAR + 1, "Static", SS_LEFT, 74, 23, 84, 11
+    LTEXT           "", IDC_RESMETER_FREE + 1, 164, 25, 44, 8
+    LTEXT           "GDI resources:", -1, 7, 41, 66, 8
+    CONTROL         "", IDC_RESMETER_BAR + 2, "Static", SS_LEFT, 74, 39, 84, 11
+    LTEXT           "", IDC_RESMETER_FREE + 2, 164, 41, 44, 8
+    DEFPUSHBUTTON   "OK", IDOK, 81, 59, 50, 14
+END
+
+IDD_FORMAT DIALOG 0, 0, 230, 160
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Format"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "Ca&pacity:", -1, 7, 7, 100, 8
+    COMBOBOX        IDC_FORMAT_CAPACITY, 7, 18, 156, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    GROUPBOX        "Format type", -1, 7, 38, 156, 52
+    CONTROL         "&Quick (erase)", IDC_FORMAT_QUICK, "Button", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 15, 51, 140, 10
+    CONTROL         "&Full", IDC_FORMAT_FULL, "Button", BS_AUTORADIOBUTTON, 15, 63, 140, 10
+    CONTROL         "Copy system files &only", IDC_FORMAT_SYSONLY, "Button", BS_AUTORADIOBUTTON, 15, 75, 140, 10
+    GROUPBOX        "Other options", -1, 7, 96, 156, 58, WS_GROUP
+    LTEXT           "&Label:", -1, 15, 110, 28, 8
+    EDITTEXT        IDC_FORMAT_LABEL, 45, 108, 110, 12, ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "&No label", IDC_FORMAT_NOLABEL, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 15, 125, 140, 10
+    CONTROL         "Cop&y system files", IDC_FORMAT_SYS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 15, 139, 140, 10
+    DEFPUSHBUTTON   "&Start", IDOK, 173, 7, 50, 14
+    PUSHBUTTON      "&Close", IDCANCEL, 173, 25, 50, 14
+END
+
+IDD_CLEANUP DIALOG 0, 0, 230, 214
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Disk Cleanup"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "D&rive:", -1, 7, 9, 26, 8
+    COMBOBOX        IDC_CLEANUP_DRIVE, 36, 7, 60, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    ICON            IDI_SNOWBALL, IDC_CLEANUP_ICON, 7, 26, 20, 20
+    LTEXT           "", IDC_CLEANUP_TEXT, 36, 28, 187, 16
+    LTEXT           "&Files to delete:", -1, 7, 50, 100, 8
+    LISTBOX         IDC_CLEANUP_LIST, 7, 60, 216, 58, LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    LTEXT           "", IDC_CLEANUP_TOTAL, 7, 122, 216, 8
+    GROUPBOX        "Description", -1, 7, 134, 216, 54
+    LTEXT           "", IDC_CLEANUP_ABOUT, 14, 146, 202, 38
+    DEFPUSHBUTTON   "OK", IDOK, 119, 194, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 173, 194, 50, 14
+END
+
+IDD_LOWDISK DIALOG 0, 0, 230, 74
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Low Disk Space"
+FONT 8, "MS Sans Serif"
+BEGIN
+    ICON            IDI_SNOWBALL, IDC_LOWDISK_ICON, 7, 8, 20, 20
+    LTEXT           "", IDC_LOWDISK_TEXT, 36, 8, 187, 40
+    DEFPUSHBUTTON   "&Disk Cleanup", IDOK, 103, 54, 64, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 173, 54, 50, 14
+END
+
+IDD_DATETIME DIALOG 0, 0, 252, 188
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Date/Time Properties"
+FONT 8, "MS Sans Serif"
+BEGIN
+    CONTROL         "", IDC_TABS, "SbTabs", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 6, 6, 240, 156
+    GROUPBOX        "&Date", -1, 14, 26, 124, 128
+    COMBOBOX        IDC_DT_MONTH, 22, 40, 62, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_DT_YEAR, 88, 40, 42, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "", IDC_DT_CALENDAR, "Static", SS_LEFT, 22, 58, 108, 88
+    GROUPBOX        "&Time", -1, 144, 26, 94, 128
+    CONTROL         "", IDC_DT_CLOCK, "Static", SS_LEFT, 156, 40, 70, 80
+    EDITTEXT        IDC_DT_TIME, 160, 128, 62, 12, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK", IDOK, 86, 168, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 141, 168, 50, 14
+    PUSHBUTTON      "&Apply", IDC_APPLY, 196, 168, 50, 14
+END

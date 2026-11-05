@@ -8,6 +8,7 @@ extern char g_ini[MAX_PATH];            /* SNOWBALL.INI there */
 int  SettingsGetInt(LPCSTR section, LPCSTR key, int def);
 void SettingsSetInt(LPCSTR section, LPCSTR key, int value);
 void SettingsGetString(LPCSTR section, LPCSTR key, LPCSTR def, LPSTR buf, int size);
+void SettingsSetString(LPCSTR section, LPCSTR key, LPCSTR value);   /* NULL: the key goes */
 
 /* ---- viewoptions.c: Folder Options, kept in SNOWBALL.INI [Folders] ---- */
 typedef struct {
@@ -17,6 +18,8 @@ typedef struct {
     int  hidden;                        /* VIEW_*: which files stay out of view */
     BOOL ownWindows;                    /* each folder opens in its own window (Windows 95) */
     BOOL infoTips;                      /* an item's description when the mouse rests on it */
+    BOOL rememberViews;                 /* each folder's own view and order */
+    BOOL singleClick;                   /* Web style: a click opens, pointing selects */
 } VIEWOPTIONS;
 #define VIEW_NO_HIDDEN_SYSTEM   0
 #define VIEW_NO_HIDDEN          1
@@ -62,6 +65,7 @@ void  PathListInit(PATHLIST *l);
 BOOL  PathListAdd(PATHLIST *l, LPCSTR path);
 LPSTR PathListLock(PATHLIST *l);                  /* walk with PathListNext until "" */
 LPSTR PathListNext(LPSTR p);
+BOOL  PathListAt(PATHLIST *l, int i, LPSTR out);  /* the i-th into out (MAX_PATH); FALSE past the end */
 void  PathListUnlock(PATHLIST *l);
 void  PathListFree(PATHLIST *l);
 
@@ -70,7 +74,8 @@ void  SortRecords(void far *base, int n, int size, int (*cmp)(const void far *, 
 
 /* ---- format.c: sizes, dates and types as Windows 98 shows them ---- */
 void FormatSize(DWORD bytes, LPSTR out);          /* "512 bytes", "1.23 KB", "4.5 MB" */
-void FormatDateTime(WORD date, WORD time, LPSTR out);  /* DOS date/time: yyyy/MM/dd HH:mm:ss */
+#define DATETIME_SIZE 48                          /* FormatDateTime fills at most this */
+void FormatDateTime(WORD date, WORD time, LPSTR out);  /* DOS date/time, by WIN.INI [intl] */
 void FormatLongDateTime(WORD date, WORD time, BOOL withTime, LPSTR out);
                                                   /* "Monday, October 26, 2026 6:58:12 PM" */
 void FormatBytes(DWORD bytes, LPSTR out);         /* "1.23 KB (1,264 bytes)" */
@@ -123,6 +128,7 @@ typedef struct {
     WORD handle;
     BOOL lfn;
     BYTE dta[43];
+    void far *oldDta;           /* 8.3: the task's DTA, back at DosFindClose */
 } DOSFIND;
 #define FA_READONLY 0x01
 #define FA_HIDDEN   0x02
@@ -144,6 +150,8 @@ BOOL  DosMakeFolder(LPCSTR path);
 BOOL  DosRemoveFolder(LPCSTR path);
 BOOL  DosChangeFolder(LPCSTR dir);                /* drive and folder */
 BOOL  DosRename(LPCSTR from, LPCSTR to);          /* also moves within a drive */
+BOOL  DosRenameFree(LPCSTR from, LPCSTR to);      /* only if to is not taken */
+BOOL  DosLengthen(LPCSTR dir, LPCSTR longName);   /* the 8.3 name DOS made of it gets it */
 BOOL  DosDelete(LPCSTR path);
 WORD  DosGetAttributes(LPCSTR path);              /* 0xFFFF if missing */
 BOOL  DosSetAttributes(LPCSTR path, WORD attr);
@@ -171,6 +179,8 @@ typedef struct {
 } SHORTCUT;
 #define SHC_EXT ".SHC"
 BOOL ShortcutRead(LPCSTR path, SHORTCUT *s);
+WORD ShortcutHotKey(LPCSTR path);                 /* that alone: 0 none */
+BOOL ShortcutTarget(LPCSTR path, LPSTR target);   /* that alone (MAX_PATH) */
 BOOL ShortcutWrite(LPCSTR path, const SHORTCUT *s);
 BOOL ShortcutCreate(LPCSTR target, LPCSTR dir, BOOL named);   /* "Shortcut to X" unless named */
 
@@ -185,6 +195,9 @@ BOOL LaunchWith(HWND owner, LPCSTR program, LPCSTR args);     /* program or shor
 BOOL LaunchAction(HWND owner, LPCSTR file, LPCSTR action);    /* a file type's action: "print" */
 void LaunchOpenRequest(HWND owner);               /* OPEN.COM's, from a DOS box, if there is one */
 BOOL LaunchCommand(HWND owner, LPCSTR cmdline, LPCSTR dir, int show);
+
+/* ---- dosprompt.c ---- */
+BOOL LaunchDosPrompt(HWND owner, LPCSTR dir, LPCSTR command, LPCSTR title);   /* in a window */
 void LaunchSplitCommand(LPCSTR cmdline, LPSTR prog, LPSTR args, int argsSize);  /* "prog" args */
 BOOL LaunchIsProgram(LPCSTR path);                /* a program, or a shortcut to one */
 

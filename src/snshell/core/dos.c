@@ -56,13 +56,15 @@ static BOOL Int21(DOSREGS *r)
         mov b, bx
         mov c, cx
         mov d, dx
+        mov ax, es
+        mov ses, ax
         sbb ax, ax
         mov cf, ax
         pop es
         pop di
         pop si
     }
-    r->ax = a; r->bx = b; r->cx = c; r->dx = d;
+    r->ax = a; r->bx = b; r->cx = c; r->dx = d; r->es = ses;
     if (cf)
         error = a;
     return !cf;
@@ -132,12 +134,23 @@ static BOOL IsDotEntry(DOSENTRY *e)
     return e->name[0] == '.' && (e->name[1] == 0 || (e->name[1] == '.' && e->name[2] == 0));
 }
 
-static BOOL SetDta(DOSFIND *f)
+static void SetDta(void far *dta)
 {
     DOSREGS r;
     Regs(&r, 0x1A00);
-    DSDX(r, f->dta);
-    return Int21(&r);
+    DSDX(r, dta);
+    Int21(&r);
+}
+
+/* An 8.3 search's own DTA; the task's goes back at the end (DosFindClose),
+   so no one is left with one in a stack frame that is gone. */
+static void OwnDta(DOSFIND *f)
+{
+    DOSREGS r;
+    Regs(&r, 0x2F00);
+    Int21(&r);
+    f->oldDta = MK_FP(r.es, r.bx);
+    SetDta(f->dta);
 }
 
 static BOOL NextRaw(DOSFIND *f, DOSENTRY *e)
@@ -151,7 +164,7 @@ static BOOL NextRaw(DOSFIND *f, DOSENTRY *e)
         ESDI(r, findData);
         return Int21(&r) && FromLfn(e);
     }
-    SetDta(f);
+    SetDta(f->dta);                     /* (a search inside this one set its own) */
     Regs(&r, 0x4F00);
     if (!Int21(&r))
         return FALSE;
@@ -159,7 +172,8 @@ static BOOL NextRaw(DOSFIND *f, DOSENTRY *e)
     return TRUE;
 }
 
-BOOL DosFindFirst(LPCSTR spec, DOSFIND *f, DOSENTRY *e)
+/* attrs: CL allowed, CH (long names only) required. */
+static BOOL FindFirst(LPCSTR spec, WORD attrs, DOSFIND *f, DOSENTRY *e)
 {
     char oem[MAX_PATH];
     DOSREGS r;
@@ -168,7 +182,7 @@ BOOL DosFindFirst(LPCSTR spec, DOSFIND *f, DOSENTRY *e)
     f->lfn = lfn;
     if (lfn) {
         Regs(&r, 0x714E);
-        r.cx = 0x0016;                  /* hidden, system and directories allowed */
+        r.cx = attrs;
         r.si = 1;                       /* DOS date/time format */
         DSDX(r, oem);
         ESDI(r, findData);
@@ -177,12 +191,14 @@ BOOL DosFindFirst(LPCSTR spec, DOSFIND *f, DOSENTRY *e)
         f->handle = r.ax;
         FromLfn(e);
     } else {
-        SetDta(f);
+        OwnDta(f);
         Regs(&r, 0x4E00);
-        r.cx = 0x0016;
+        r.cx = attrs & 0xFF;
         DSDX(r, oem);
-        if (!Int21(&r))
+        if (!Int21(&r)) {
+            SetDta(f->oldDta);
             return FALSE;
+        }
         FromDta(f, e);
     }
     while (IsDotEntry(e))
@@ -193,38 +209,29 @@ BOOL DosFindFirst(LPCSTR spec, DOSFIND *f, DOSENTRY *e)
     return TRUE;
 }
 
+BOOL DosFindFirst(LPCSTR spec, DOSFIND *f, DOSENTRY *e)
+{
+    return FindFirst(spec, 0x0016, f, e);         /* hidden, system and directories too */
+}
+
 /* Whether dir holds any visible folder. With long names DOS is asked for
    folders only (CH = required attributes), so big folders cost nothing. */
 BOOL DosHasSubfolders(LPCSTR dir)
 {
-    char spec[MAX_PATH], oem[MAX_PATH];
-    static DOSENTRY e;
+    char spec[MAX_PATH];
+    DOSENTRY e;
     DOSFIND f;
-    DOSREGS r;
     BOOL found = FALSE;
 
     if (lstrlen(dir) + 5 > MAX_PATH)
         return FALSE;
     lstrcpy(spec, dir);
     PathAppend(spec, "*.*");
-    if (lfn) {
-        AnsiToOem(spec, oem);
-        Regs(&r, 0x714E);
-        r.cx = 0x1016;                  /* CH folders required, CL hidden/system allowed */
-        r.si = 1;
-        DSDX(r, oem);
-        ESDI(r, findData);
-        if (!Int21(&r))
-            return FALSE;
-        f.lfn = TRUE;
-        f.handle = r.ax;
-        FromLfn(&e);
-    } else if (!DosFindFirst(spec, &f, &e)) {
+    if (!FindFirst(spec, 0x1016, &f, &e))        /* folders only, hidden and system allowed */
         return FALSE;
-    }
     do
-        found = (e.attr & FA_DIR) && !ViewOptionsHides(e.attr) && !IsDotEntry(&e);
-    while (!found && NextRaw(&f, &e));
+        found = (e.attr & FA_DIR) && !ViewOptionsHides(e.attr);
+    while (!found && DosFindNext(&f, &e));
     DosFindClose(&f);
     return found;
 }
@@ -242,7 +249,9 @@ void DosFindClose(DOSFIND *f)
 {
     DOSREGS r;
 
-    if (f->lfn && f->handle) {
+    if (!f->lfn) {
+        SetDta(f->oldDta);
+    } else if (f->handle) {
         Regs(&r, 0x71A1);
         r.bx = f->handle;
         Int21(&r);
@@ -447,14 +456,17 @@ BOOL DosVolumeLabel(int drive, LPSTR out)
     DOSFIND f;
     DOSREGS r;
     LPSTR dot;
+    BOOL found;
 
     *out = '\0';
     spec[0] = (char)('A' + drive);
-    SetDta(&f);
+    OwnDta(&f);
     Regs(&r, 0x4E00);
     r.cx = 0x0008;
     DSDX(r, spec);
-    if (!Int21(&r) || !(f.dta[21] & 0x08))
+    found = Int21(&r) && (f.dta[21] & 0x08);
+    SetDta(f.oldDta);
+    if (!found)
         return FALSE;
     OemToAnsi((LPCSTR)(f.dta + 30), out);
     if ((dot = _fstrchr(out, '.')) != NULL)     /* 11 characters, stored as 8.3 */
@@ -537,4 +549,35 @@ BOOL DosCreateTextFile(LPCSTR path, LPCSTR text)
     ok = _lwrite(h, text, n) == n;
     _lclose(h);
     return ok;
+}
+
+/* from renamed to: only if from is there and to is not (nor the same name). */
+BOOL DosRenameFree(LPCSTR from, LPCSTR to)
+{
+    return lstrcmpi(from, to) && DosGetAttributes(from) != 0xFFFF && DosGetAttributes(to) == 0xFFFF
+           && DosRename(from, to);
+}
+
+/* What was made as longName in dir while long names did not work has the
+   name DOS gave it: DOSBox-X leaves out the spaces ("MYDOCUME"), MS-DOS cuts
+   the name at 8 ("MY DOCUM"). That one gets longName. */
+BOOL DosLengthen(LPCSTR dir, LPCSTR longName)
+{
+    char from[MAX_PATH], to[MAX_PATH], packed[9], cut[9];
+    int i, n = 0;
+
+    for (i = 0; longName[i] && n < 8; i++)
+        if (longName[i] != ' ')
+            packed[n++] = longName[i];
+    packed[n] = '\0';
+    lstrcpyn(cut, longName, sizeof cut);
+    lstrcpy(to, dir);
+    PathAppend(to, longName);
+    lstrcpy(from, dir);
+    PathAppend(from, packed);
+    if (DosRenameFree(from, to))
+        return TRUE;
+    lstrcpy(from, dir);
+    PathAppend(from, cut);
+    return DosRenameFree(from, to);
 }

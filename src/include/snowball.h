@@ -1,6 +1,6 @@
 /*
  * Snowball - a Windows 98 style shell for Windows 3.11.
- * Copyright (C) 2026 Snowball contributors. GPL 2 or later.
+ * Copyright (C) 2026 Snowball contributors. GPL 3.
  * Based on the design of Calmira Reborn (GPL 2+).
  *
  * What Snowball's three binaries share (include after windows.h):
@@ -14,7 +14,7 @@
 #define SNOWBALL_H
 
 #define SB_NAME     "Snowball"
-#define SB_VERSION  "v20261025"
+#define SB_VERSION  "v20261105"
 
 #define MAX_PATH    260
 
@@ -46,6 +46,9 @@
 #define SK_ALT        0x04
 #define SBM_WINKEY    (WM_USER + 114)   /* the Windows key: wParam 0 alone, else the key with it;
                                            lParam Shift was down */
+#define SBM_SNAP      (WM_USER + 115)   /* wParam window dropped at the screen's edge, lParam VK_LEFT/RIGHT/UP */
+#define SBM_ARROWS    (WM_USER + 116)   /* wParam window whose scroll bar arrows Windows may have drawn:
+                                           SkinScrollArrows, from SNSYSTEM */
 #define SBM_SOUND     (WM_USER + 113)   /* wParam SOUND_*: a sound event (a menu popped up) */
 #define SOUND_OPEN        0             /* the events (WIN.INI [sounds], sounds.c) */
 #define SOUND_CLOSE       1

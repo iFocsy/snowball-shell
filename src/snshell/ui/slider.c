@@ -1,6 +1,6 @@
 /*
  * Windows 98's slider: a sunken groove and a raised thumb over positions
- * from the left; dragged, clicked beside the thumb (a step that way) or
+ * from the left (SLS_VERTICAL: from the bottom); dragged, clicked beside the thumb (a step that way) or
  * moved with the arrows, Home and End. The parent hears of each change by
  * WM_COMMAND, SLN_CHANGE.
  */
@@ -10,21 +10,35 @@
 #define Pos(w)      ((int)GetWindowWord(w, 0))
 #define Count(w)    ((int)GetWindowWord(w, 2))
 
-static int ThumbLeft(HWND w, int pos)
+static BOOL Vertical(HWND w)
+{
+    return (GetWindowLong(w, GWL_STYLE) & SLS_VERTICAL) != 0;
+}
+
+/* Its length, and a point along it from where positions start. */
+static int Length(HWND w)
 {
     RECT c;
 
     GetClientRect(w, &c);
-    return Count(w) > 1 ? pos * (c.right - THUMB_W) / (Count(w) - 1) : 0;
+    return Vertical(w) ? c.bottom : c.right;
+}
+
+static int Along(HWND w, LPARAM lp)
+{
+    return Vertical(w) ? Length(w) - 1 - (short)HIWORD(lp) : (short)LOWORD(lp);
+}
+
+/* Where the thumb starts, along it. */
+static int ThumbAt(HWND w, int pos)
+{
+    return Count(w) > 1 ? pos * (Length(w) - THUMB_W) / (Count(w) - 1) : 0;
 }
 
 static int PosAt(HWND w, int x)
 {
-    RECT c;
-    int span;
+    int span = Length(w) - THUMB_W;
 
-    GetClientRect(w, &c);
-    span = c.right - THUMB_W;
     if (Count(w) < 2 || span <= 0)
         return 0;
     return (int)(((long)(x - THUMB_W / 2) * (Count(w) - 1) + span / 2) / span);
@@ -50,10 +64,16 @@ static void Paint(HWND w)
     BeginPaint(w, &ps);
     GetClientRect(w, &c);
     DrawSolidRect(ps.hdc, &c, GetSysColor(COLOR_BTNFACE));
-    SetRect(&r, THUMB_W / 2, c.bottom / 2 - 2, c.right - THUMB_W / 2, c.bottom / 2 + 2);
-    DrawBevel(ps.hdc, &r, TRUE);
-    x = ThumbLeft(w, Pos(w));
-    SetRect(&r, x, 1, x + THUMB_W, c.bottom - 1);
+    x = ThumbAt(w, Pos(w));
+    if (Vertical(w)) {
+        SetRect(&r, c.right / 2 - 2, THUMB_W / 2, c.right / 2 + 2, c.bottom - THUMB_W / 2);
+        DrawBevel(ps.hdc, &r, TRUE);
+        SetRect(&r, 1, c.bottom - x - THUMB_W, c.right - 1, c.bottom - x);
+    } else {
+        SetRect(&r, THUMB_W / 2, c.bottom / 2 - 2, c.right - THUMB_W / 2, c.bottom / 2 + 2);
+        DrawBevel(ps.hdc, &r, TRUE);
+        SetRect(&r, x, 1, x + THUMB_W, c.bottom - 1);
+    }
     DrawSolidRect(ps.hdc, &r, GetSysColor(COLOR_BTNFACE));
     DrawBevel(ps.hdc, &r, FALSE);
     if (GetFocus() == w)
@@ -63,7 +83,9 @@ static void Paint(HWND w)
 
 LRESULT CALLBACK __export SliderProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
-    int x = (short)LOWORD(lp);
+    int x = Along(w, lp), up = Vertical(w) ? 1 : -1;
+
+    HOOK_DESCRIBE(msg, SliderDescribe(w, (LPSTR)lp, wp));
 
     switch (msg) {
     case WM_PAINT:
@@ -79,17 +101,19 @@ LRESULT CALLBACK __export SliderProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_KEYDOWN:
         switch (wp) {
-        case VK_LEFT:  case VK_UP:   Set(w, Pos(w) - 1, TRUE); break;
-        case VK_RIGHT: case VK_DOWN: Set(w, Pos(w) + 1, TRUE); break;
+        case VK_LEFT:  Set(w, Pos(w) - 1, TRUE); break;
+        case VK_RIGHT: Set(w, Pos(w) + 1, TRUE); break;
+        case VK_UP:    Set(w, Pos(w) + up, TRUE); break;
+        case VK_DOWN:  Set(w, Pos(w) - up, TRUE); break;
         case VK_HOME:                Set(w, 0, TRUE); break;
         case VK_END:                 Set(w, Count(w) - 1, TRUE); break;
         }
         return 0;
     case WM_LBUTTONDOWN:
         SetFocus(w);
-        if (x < ThumbLeft(w, Pos(w)))
+        if (x < ThumbAt(w, Pos(w)))
             Set(w, Pos(w) - 1, TRUE);
-        else if (x >= ThumbLeft(w, Pos(w)) + THUMB_W)
+        else if (x >= ThumbAt(w, Pos(w)) + THUMB_W)
             Set(w, Pos(w) + 1, TRUE);
         else
             SetCapture(w);
@@ -125,13 +149,13 @@ int SliderPos(HWND s)
 
 BOOL SliderRegister(void)
 {
-    WNDCLASS wc;
 
-    _fmemset(&wc, 0, sizeof wc);
-    wc.lpfnWndProc = SliderProc;
-    wc.cbWndExtra = 4;
-    wc.hInstance = g_hInst;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = SLIDER_CLASS;
-    return RegisterClass(&wc);
+    return WindowRegister(SLIDER_CLASS, SliderProc, 0, 4, NULL, NULL);
 }
+
+#ifdef SNOWBALL_HOOKS
+int SliderCount(HWND s)                 /* the tests' hooks (src\hooks) */
+{
+    return Count(s);
+}
+#endif

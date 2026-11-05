@@ -17,6 +17,11 @@ void SettingsSetInt(LPCSTR section, LPCSTR key, int value)
     WritePrivateProfileString(section, key, text, g_ini);
 }
 
+void SettingsSetString(LPCSTR section, LPCSTR key, LPCSTR value)
+{
+    WritePrivateProfileString(section, key, value, g_ini);
+}
+
 void SettingsGetString(LPCSTR section, LPCSTR key, LPCSTR def, LPSTR buf, int size)
 {
     GetPrivateProfileString(section, key, def, buf, size, g_ini);

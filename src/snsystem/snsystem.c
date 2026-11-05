@@ -12,7 +12,8 @@ int FAR PASCAL LibMain(HINSTANCE hInst, WORD dataSeg, WORD heapSize, LPSTR cmdLi
 int FAR PASCAL WEP(int exitType)
 {
     HookRemove();
-    CpuStop();
+    CpuEnd(FALSE);
     FileDialogsServe(NULL);
+    DrawFree();
     return 1;
 }

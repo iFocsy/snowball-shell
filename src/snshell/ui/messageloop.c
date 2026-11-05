@@ -14,7 +14,7 @@ BOOL MessageLoopPump(HWND dlg)
             PostQuitMessage(msg.wParam);
             return FALSE;
         }
-        if (!dlg || !IsDialogMessage(dlg, &msg)) {
+        if (!dlg || !IsWindow(dlg) || !IsDialogMessage(dlg, &msg)) {     /* (a message may have closed it) */
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }

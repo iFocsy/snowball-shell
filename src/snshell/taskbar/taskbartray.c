@@ -6,6 +6,7 @@
  * button at all (Calmira's applet tray and exclusions). Also the item
  * under the mouse and its tooltip: Quick Launch's buttons, the tray's
  * programs, the clock's date, task buttons too narrow for their titles.
+ * traytools.c draws the tray's own icons, after the programs'.
  */
 #include "internal.h"
 #include "taskbarint.h"
@@ -16,7 +17,6 @@ int TaskbarClockW;                      /* the time's width, in pixels */
 static char trayPrograms[MAX_TRAY][MAX_PATH];   /* SNOWBALL.INI [Tray]: icons by the clock */
 HICON TaskbarTrayIcons[MAX_TRAY];
 int TaskbarNTray;
-#define MAX_HIDDEN  16
 static char hiddenNames[MAX_HIDDEN][13];        /* [Hidden]: no button ("CLOCK.EXE") */
 static int nHidden;
 
@@ -75,6 +75,7 @@ void TaskbarLoadPrograms(void)
             AnsiUpper(hiddenNames[nHidden++]);
         }
     }
+    TrayToolsLoad();
 }
 
 /* The time; the clock timer is set to fire again on the next minute. */
@@ -126,6 +127,8 @@ void TaskbarTip(void)
     *text = '\0';
     if (TaskbarHot <= QL(0)) {
         QuickLaunchName(QL(0) - TaskbarHot, text);
+    } else if (TaskbarHot <= TRAYICON(TaskbarNTray) && TaskbarHot > QL(0)) {
+        TrayToolsTip(TRAYICON(TaskbarNTray) - TaskbarHot, text);
     } else if (TaskbarHot <= TRAYICON(0) && TaskbarHot > QL(0)) {
         DisplayNameOfFile(PathFileName(trayPrograms[TRAYICON(0) - TaskbarHot]), text);
         if (*PathExtension(text))
@@ -176,6 +179,10 @@ void TaskbarClickTray(int i)
 {
     HWND w;
 
+    if (i >= TaskbarNTray) {
+        TrayToolsClick(i - TaskbarNTray);
+        return;
+    }
     for (w = GetWindow(GetDesktopWindow(), GW_CHILD); w; w = GetWindow(w, GW_HWNDNEXT))
         if (IsWindowVisible(w) && !GetWindow(w, GW_OWNER) && TaskbarTrayProgram(w) == i)
             break;
@@ -187,13 +194,13 @@ void TaskbarClickTray(int i)
         TaskbarSwitchTo(w);
 }
 
-/* A double click on the clock: Date/Time; FALSE elsewhere (a click). */
+/* A double click on the clock: Date/Time Properties; FALSE elsewhere (a click). */
 BOOL TaskbarDoubleClick(HWND w, int x, int y)
 {
     if (TaskbarHitButton(x, y) != TRAY)
         return FALSE;
     TooltipHide();
-    LaunchCommand(w, "CONTROL.EXE date/time", NULL, SW_SHOWNORMAL);
+    DateTimeShow();
     return TRUE;
 }
 

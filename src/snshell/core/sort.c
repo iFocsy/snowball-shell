@@ -6,13 +6,16 @@ void SortRecords(void far *base, int n, int size, int (*cmp)(const void far *, c
 {
     BYTE tmp[64];
     BYTE far *b = (BYTE far *)base;
+    unsigned u = size;                  /* offsets within one segment: unsigned, never negative */
     int gap, i, j;
 
+    if (u > sizeof tmp)
+        return;
     for (gap = n / 2; gap > 0; gap /= 2)
         for (i = gap; i < n; i++) {
-            _fmemcpy(tmp, b + i * size, size);
-            for (j = i; j >= gap && cmp(b + (j - gap) * size, tmp) > 0; j -= gap)
-                _fmemcpy(b + j * size, b + (j - gap) * size, size);
-            _fmemcpy(b + j * size, tmp, size);
+            _fmemcpy(tmp, b + i * u, u);
+            for (j = i; j >= gap && cmp(b + (j - gap) * u, tmp) > 0; j -= gap)
+                _fmemcpy(b + j * u, b + (j - gap) * u, u);
+            _fmemcpy(b + j * u, tmp, u);
         }
 }

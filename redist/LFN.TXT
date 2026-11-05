@@ -5,10 +5,10 @@ Gives Windows 3.11 programs the Windows 95 long file name API
 (INT 21h AX=71xxh), using the LFN support built into DOSBox-X.
 
 Install:
-  1. copies LFN.DRV to drive-c\WINDOWS\SYSTEM
+  1. copies LFN.DRV to WINDOWS\SYSTEM
   2. adds lfn.drv to the "drivers=" line in [boot] of SYSTEM.INI, and
      a [lfn.drv] section with LongPaths=1
-  3. sets "lfn = true" in the [dos] section of w311.conf
+  3. sets "lfn = true" in the [dos] section of DOSBox-X's configuration file
 
 * Skip 1 and 2 if you installed from Snowball's Inno Setup
 

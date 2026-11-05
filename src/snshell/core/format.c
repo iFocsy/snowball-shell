@@ -76,29 +76,42 @@ static LPSTR PutDate(LPSTR out, WORD date, LPCSTR picture)
     return out;
 }
 
-/* The time with seconds in the 12 or 24 hour form of WIN.INI [intl]. */
+/* The time with seconds as WIN.INI [intl] says: 12 or 24 hours, separator,
+   leading zero. */
 static void PutTime(LPSTR out, WORD time)
 {
     int hour = time >> 11, minute = (time >> 5) & 63;
     char sep[4], ampm[8];
 
     GetProfileString("intl", "sTime", ":", sep, sizeof sep);
-    if (GetProfileInt("intl", "iTime", 0))
-        out += wsprintf(out, "%d%s%02d", hour, (LPSTR)sep, minute);
-    else
-        out += wsprintf(out, "%d%s%02d", hour % 12 ? hour % 12 : 12, (LPSTR)sep, minute);
+    if (!GetProfileInt("intl", "iTime", 0))
+        hour = hour % 12 ? hour % 12 : 12;
+    out += wsprintf(out, GetProfileInt("intl", "iTLZero", 0) ? "%02d%s%02d" : "%d%s%02d", hour, (LPSTR)sep, minute);
     out += wsprintf(out, "%s%02d", (LPSTR)sep, (time & 31) * 2);
+    hour = time >> 11;
     if (!GetProfileInt("intl", "iTime", 0)) {
         GetProfileString("intl", hour < 12 ? "s1159" : "s2359", hour < 12 ? "AM" : "PM", ampm, sizeof ampm);
         wsprintf(out, " %s", (LPSTR)ampm);
     }
 }
 
-/* "2026/10/26 18:58:12", one form whatever [intl] says (the Details view). */
+/* A date and time by WIN.INI [intl]: sShortDate, or, in a file without it,
+   iDate's order with sDate; then the time (the Details view). */
 void FormatDateTime(WORD date, WORD time, LPSTR out)
 {
-    wsprintf(out, "%d/%02d/%02d %02d:%02d:%02d", (date >> 9) + 1980, (date >> 5) & 15, date & 31,
-             time >> 11, (time >> 5) & 63, (time & 31) * 2);
+    static const char *const orders[] = { "M%sd%syy", "d%sM%syy", "yy%sM%sd" };
+    char picture[40], sep[4], text[128];        /* any picture that fits, with its names */
+    LPSTR end;
+    UINT order = GetProfileInt("intl", "iDate", 0);
+
+    if (!GetProfileString("intl", "sShortDate", "", picture, sizeof picture)) {
+        GetProfileString("intl", "sDate", "/", sep, sizeof sep);
+        wsprintf(picture, orders[min(order, 2)], (LPSTR)sep, (LPSTR)sep);
+    }
+    end = PutDate(text, date, picture);
+    *end++ = ' ';
+    PutTime(end, time);
+    lstrcpyn(out, text, DATETIME_SIZE);
 }
 
 /* "Monday, October 26, 2026 6:58:12 PM" by sLongDate (Properties). */
@@ -196,14 +209,11 @@ static BOOL Win31Name(LPCSTR name)
 
 static BOOL FromRegistry(LPCSTR ext, LPSTR out, int size)
 {
-    char key[8], cls[64];
-    LONG n = sizeof cls;
+    char cls[64];
+    LONG n = size;
 
-    wsprintf(key, ".%s", ext);
-    if (RegQueryValue(HKEY_CLASSES_ROOT, key, cls, &n) != ERROR_SUCCESS || !cls[0])
-        return FALSE;
-    n = size;
-    return RegQueryValue(HKEY_CLASSES_ROOT, cls, out, &n) == ERROR_SUCCESS && out[0];
+    return FileTypeClass(ext, cls, sizeof cls) && RegQueryValue(HKEY_CLASSES_ROOT, cls, out, &n) == ERROR_SUCCESS &&
+           out[0];
 }
 
 void FormatFileType(LPCSTR name, LPSTR out)

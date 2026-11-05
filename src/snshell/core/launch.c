@@ -5,12 +5,12 @@
  */
 #include "internal.h"
 
-static SHORTCUT s;                     /* large: one for the module, never in use twice */
-
 BOOL LaunchIsProgram(LPCSTR path)
 {
+    char target[MAX_PATH];
+
     if (PathIsShortcut(path))
-        return ShortcutRead(path, &s) && PathIsProgram(s.target);
+        return ShortcutTarget(path, target) && PathIsProgram(target);
     return PathIsProgram(path);
 }
 
@@ -39,6 +39,10 @@ static BOOL Launch(HWND owner, LPCSTR file, LPCSTR longArgs, LPCSTR dir, int sho
     char shortFile[MAX_PATH], shortDir[MAX_PATH], args[128], cmd[MAX_PATH + 130], cls[40], action[16];
     UINT r;
 
+    if (!lstrcmpi(PathFileName((LPSTR)file), "DOSPRMPT.PIF"))     /* Windows' own: full screen */
+        return LaunchDosPrompt(owner, dir, NULL, "MS-DOS Prompt");
+    if (!*longArgs && ProgramManagerIsGroupFile(file))            /* a Program Manager group */
+        return ProgramManagerImportGroup(owner, file);
     lstrcpyn(args, longArgs, sizeof args);
     DosShortPath(file, shortFile);
     shortDir[0] = '\0';
@@ -80,7 +84,7 @@ BOOL LaunchAction(HWND owner, LPCSTR file, LPCSTR action)
 
 BOOL LaunchItem(HWND owner, LPCSTR path)
 {
-    char target[MAX_PATH];
+    SHORTCUT s;
 
     if (PathIsFolder(path)) {
         FolderWindowOpen(path);
@@ -91,6 +95,8 @@ BOOL LaunchItem(HWND owner, LPCSTR path)
             return FALSE;
         if (!PathIsProgram(path))       /* Start > Documents */
             RecentAdd(path);
+        else
+            FrequentCount(path);        /* the two-column Start menu's most used */
         return TRUE;
     }
     if (!ShortcutRead(path, &s)) {
@@ -101,11 +107,12 @@ BOOL LaunchItem(HWND owner, LPCSTR path)
         FolderWindowOpen(s.target);
         return TRUE;
     }
-    lstrcpy(target, s.target);
     if (!Launch(owner, s.target, s.args, s.dir, s.show ? s.show : SW_SHOWNORMAL))
         return FALSE;
-    if (!PathIsProgram(target))
-        RecentAdd(target);
+    if (!PathIsProgram(s.target))
+        RecentAdd(s.target);
+    else
+        FrequentCount(path);
     return TRUE;
 }
 
@@ -114,6 +121,7 @@ BOOL LaunchItem(HWND owner, LPCSTR path)
 BOOL LaunchWith(HWND owner, LPCSTR program, LPCSTR args)
 {
     char all[256];
+    SHORTCUT s;
 
     if (!PathIsShortcut(program))
         return Launch(owner, program, args, NULL, SW_SHOWNORMAL);
@@ -185,7 +193,7 @@ void LaunchOpenRequest(HWND owner)
     _lclose(h);
     DosDelete(file);
     text[max(n, 0)] = '\0';
-    if ((typed = _fstrchr(text, '\r')) == NULL)
+    if ((typed = _fstrchr(text, '\r')) == NULL || typed - text >= MAX_PATH)
         return;
     *typed = '\0';
     typed += typed[1] == '\n' ? 2 : 1;

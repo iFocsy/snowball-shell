@@ -8,7 +8,6 @@
 
 #define QUICKVIEW_CLASS "SbQuickView"
 #define QV_MAX      60000U             /* text read */
-#define QV_PICTURE  0x400000L           /* pictures read */
 #define QV_LINES    6000
 #define QVC_EDIT    1
 #define QVC_EXIT    2
@@ -17,9 +16,10 @@
 typedef struct {
     HGLOBAL  self;
     char     path[MAX_PATH];
-    HGLOBAL  hData;                     /* the file's bytes (a BMP: from its BITMAPINFO on) */
+    DIB      dib;                       /* a BMP's picture */
+    HGLOBAL  hData;                     /* else the text */
     DWORD    size;
-    HGLOBAL  hLines;                    /* text: where each line starts */
+    HGLOBAL  hLines;                    /* where each line starts */
     int      lines, top, lineH;
     BOOL     picture;
 } QVIEW;
@@ -43,34 +43,46 @@ BOOL QuickViewCan(LPCSTR path)
     return FALSE;
 }
 
-/* The file read: a BMP's picture (BITMAPINFO and bits), else the text and
-   where its lines start. */
+/* What a view holds, and the view itself, freed. */
+static void Free(QVIEW FAR *q)
+{
+    HGLOBAL self = q->self;
+
+    DibFree(&q->dib);
+    if (q->hData)
+        GlobalFree(q->hData);
+    if (q->hLines)
+        GlobalFree(q->hLines);
+    GlobalUnlock(self);
+    GlobalFree(self);
+}
+
+/* The file read: a BMP's picture (checked: a damaged one is not shown),
+   else the text and where its lines start. */
 static BOOL Load(QVIEW FAR *q)
 {
-    char shortPath[MAX_PATH], head[2];
-    BYTE huge *d;
+    BYTE FAR *d;
     WORD FAR *at;
     HFILE h;
+    LONG len;
     DWORD i;
     UINT n;
 
-    DosShortPath(q->path, shortPath);
-    if ((h = _lopen(shortPath, OF_READ | OF_SHARE_DENY_NONE)) == HFILE_ERROR)
+    if (!lstrcmpi(PathExtension(q->path), ".BMP"))
+        return q->picture = DibLoad(q->path, &q->dib);
+    if ((h = DosOpenRead(q->path)) == HFILE_ERROR)
         return FALSE;
-    q->picture = _lread(h, head, 2) == 2 && head[0] == 'B' && head[1] == 'M';
-    q->size = min(_llseek(h, 0, 2), q->picture ? QV_PICTURE : (LONG)QV_MAX);
+    len = _llseek(h, 0, 2);
     _llseek(h, 0, 0);
-    if ((q->hData = GlobalAlloc(GMEM_MOVEABLE, q->size + 1)) == NULL) {
+    if (len < 0 || (q->hData = GlobalAlloc(GMEM_MOVEABLE, min(len, (LONG)QV_MAX) + 1)) == NULL) {
         _lclose(h);
         return FALSE;
     }
-    d = (BYTE huge *)GlobalLock(q->hData);
-    q->size = q->picture ? (DWORD)_hread(h, (void huge *)d, q->size) : (n = _lread(h, (LPVOID)d, (UINT)q->size)) == HFILE_ERROR ? 0 : n;
+    d = (BYTE FAR *)GlobalLock(q->hData);
+    n = _lread(h, d, (UINT)min(len, (LONG)QV_MAX));
+    q->size = n == (UINT)HFILE_ERROR ? 0 : n;
     _lclose(h);
-    if (q->size == (DWORD)HFILE_ERROR)
-        q->size = 0;
-    q->picture = q->picture && q->size > 54;
-    if (!q->picture && (q->hLines = GlobalAlloc(GMEM_MOVEABLE, QV_LINES * sizeof(WORD))) != NULL) {
+    if ((q->hLines = GlobalAlloc(GMEM_MOVEABLE, QV_LINES * sizeof(WORD))) != NULL) {
         at = (WORD FAR *)GlobalLock(q->hLines);
         at[q->lines++] = 0;
         for (i = 0; i < q->size && q->lines < QV_LINES; i++)
@@ -86,8 +98,7 @@ static void Paint(HWND w)
 {
     QVIEW FAR *q = Qv(w);
     PAINTSTRUCT ps;
-    BYTE huge *d;
-    BITMAPINFOHEADER FAR *bi;
+    BYTE FAR *d;
     WORD FAR *at;
     RECT c;
     HFONT old;
@@ -97,12 +108,10 @@ static void Paint(HWND w)
     GetClientRect(w, &c);
     c.bottom -= STATUS_H;
     DrawSolidRect(ps.hdc, &c, GetSysColor(COLOR_WINDOW));
-    d = (BYTE huge *)GlobalLock(q->hData);
     if (q->picture) {                   /* at its own size, from the top left */
-        bi = (BITMAPINFOHEADER FAR *)(d + 14);
-        SetDIBitsToDevice(ps.hdc, 4, 4, (int)bi->biWidth, (int)bi->biHeight, 0, 0, 0, (UINT)bi->biHeight,
-                          (LPVOID)(d + *(DWORD FAR *)(d + 10)), (BITMAPINFO FAR *)bi, DIB_RGB_COLORS);
+        DibDraw(ps.hdc, &q->dib, 4, 4, q->dib.w, q->dib.h);
     } else if (q->hLines) {
+        d = (BYTE FAR *)GlobalLock(q->hData);
         at = (WORD FAR *)GlobalLock(q->hLines);
         old = SelectObject(ps.hdc, GetStockObject(ANSI_FIXED_FONT));
         SetTextColor(ps.hdc, GetSysColor(COLOR_WINDOWTEXT));
@@ -115,8 +124,8 @@ static void Paint(HWND w)
         }
         SelectObject(ps.hdc, old);
         GlobalUnlock(q->hLines);
+        GlobalUnlock(q->hData);
     }
-    GlobalUnlock(q->hData);
     GetClientRect(w, &c);
     {
         static const int whole[] = { 0 };
@@ -202,14 +211,8 @@ LRESULT CALLBACK __export QuickViewProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_DESTROY:
         if (q) {
-            HGLOBAL self = q->self;
-            if (q->hData)
-                GlobalFree(q->hData);
-            if (q->hLines)
-                GlobalFree(q->hLines);
             SetWindowLong(w, 0, 0L);
-            GlobalUnlock(self);
-            GlobalFree(self);
+            Free(q);
         }
         return 0;
     }
@@ -218,7 +221,6 @@ LRESULT CALLBACK __export QuickViewProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 void QuickViewShow(LPCSTR path)
 {
-    WNDCLASS wc;
     HGLOBAL h;
     QVIEW FAR *q;
     HMENU menu, file;
@@ -229,14 +231,7 @@ void QuickViewShow(LPCSTR path)
     HWND w;
 
     if (!registered) {
-        _fmemset(&wc, 0, sizeof wc);
-        wc.lpfnWndProc = QuickViewProc;
-        wc.cbWndExtra = sizeof(LONG);
-        wc.hInstance = g_hInst;
-        wc.hIcon = IconStock(IDI_FILE);
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = QUICKVIEW_CLASS;
-        registered = RegisterClass(&wc);
+        registered = WindowRegister(QUICKVIEW_CLASS, QuickViewProc, 0, sizeof(LONG), IconStock(IDI_FILE), NULL);
     }
     if ((h = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(QVIEW))) == NULL)
         return;
@@ -245,8 +240,7 @@ void QuickViewShow(LPCSTR path)
     lstrcpy(q->path, path);
     if (!Load(q)) {
         FileOperationError(NULL, "open", path, DosLastError());
-        GlobalUnlock(h);
-        GlobalFree(h);
+        Free(q);
         return;
     }
     dc = GetDC(NULL);
@@ -269,11 +263,7 @@ void QuickViewShow(LPCSTR path)
                      60, 50, 520, 400, NULL, menu, g_hInst, NULL);
     if (!w) {
         DestroyMenu(menu);
-        GlobalFree(q->hData);
-        if (q->hLines)
-            GlobalFree(q->hLines);
-        GlobalUnlock(h);
-        GlobalFree(h);
+        Free(q);
         return;
     }
     SetWindowLong(w, 0, (LONG)q);

@@ -4,6 +4,7 @@ What Setup changed
 - SYSTEM.INI: shell= and taskman.exe= are Snowball's (Ctrl+Esc opens its Start menu); fonts.fon is SBSANS8.FON, Windows 98's menu and dialog font, made from this Windows' own fonts; WinTimeSlice=200,50 gives Windows programs more time beside busy DOS boxes.
 - WIN.INI and CONTROL.INI: Windows 98's colour scheme.
 - LFN.DRV, long file names for Windows programs, if you chose it: in WINDOWS\SYSTEM, loaded at startup. It needs a DOS with long file names (DOSBox-X with lfn=true, or a DOS LFN driver).
+- USERX.DRV and GDIX.DRV, the USER and GDI Resource Extensions, if you chose them: in WINDOWS\SYSTEM, loaded at startup. See RESEXT.TXT in Snowball's folder.
 Each value replaced is kept in UNINSTAL.INI, in Snowball's folder, and the uninstaller puts it back.
 
 Under DOSBox-X

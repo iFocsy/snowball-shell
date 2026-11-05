@@ -5,15 +5,30 @@
 /* ---- paint.c ---- */
 void  PaintStripImage(HDC dc, int x, int y, int strip, int index);   /* square images, magenta transparent */
 void  PaintBitmap(HDC dc, int x, int y, int id);  /* a whole bitmap, magenta transparent */
+HBRUSH PaintChecker(void);                        /* 50% of the DC's text and background colours */
+void  PaintProgressBar(HDC dc, const RECT *r, int permille, COLORREF blocks);
 #define STATUS_H        19              /* height of a status bar (the frame's face below it) */
 void  PaintHeaderCell(HDC dc, const RECT *r, LPCSTR label, UINT align, BOOL pressed);
-void  PaintListItem(const DRAWITEMSTRUCT FAR *d, int x, HICON icon, LPCSTR name);  /* icon, name */
+void  PaintListItem(const DRAWITEMSTRUCT FAR *d, int x, HICON icon, LPCSTR name, BOOL bold);  /* icon (if any), name */
 void  PaintStatusBar(HDC dc, const RECT *c, int n, const int *widths, LPCSTR FAR *texts,
                      const HICON *icons, BOOL grip);     /* width 0: the rest; images may be NULL */
 BOOL  StatusBarGrip(HWND w, LPARAM screenPoint);        /* in its status bar's size grip */
 
+/* ---- dib.c: BMP files, read whole and checked ---- */
+typedef struct {
+    HGLOBAL mem;                        /* the file after its BITMAPFILEHEADER */
+    int     w, h;
+    DWORD   bits;                       /* where the pixels start in mem */
+    int     shownW, shownH;             /* a small view: its size on the screen; else 0 */
+} DIB;
+BOOL  DibLoad(LPCSTR path, DIB *d);               /* FALSE: not a bitmap GDI can safely draw */
+void  DibDraw(HDC dc, const DIB *d, int x, int y, int cx, int cy);   /* stretched to cx by cy */
+void  DibFree(DIB *d);
+
 /* ---- window.c ---- */
 void  WindowCenter(HWND w);                       /* across, and a third down the screen */
+BOOL  WindowRegister(LPCSTR name, WNDPROC proc, UINT style, int extra, HICON icon, HBRUSH background);
+void  WindowRectIn(HWND w, HWND in, RECT *r);     /* w's rectangle in in's client coordinates */
 
 /* ---- messageloop.c: the shell's one message loop ---- */
 int   MessageLoopRun(void);                       /* until Windows ends */
@@ -26,7 +41,8 @@ void  DriveTypeName(int drive, LPSTR out);        /* "Local Disk", "Removable Di
 void  DriveName(int drive, LPSTR out);            /* "3 1/2 Floppy (A:)" with the half sign, "(C:)" */
 
 /* ---- icons.c: icons by file, shortcut and drive, cached ---- */
-HICON IconStock(int id);
+HICON IconStock(int id);                          /* the shell's own (a theme's for the desktop's) */
+void  IconsThemeChanged(void);                    /* the desktop's icons are read again */
 HICON IconForFile(LPCSTR path, BOOL isDir);       /* never NULL */
 void  IconsForgetDocuments(void);                 /* file types changed: documents' icons again */
 void  IconsForget(LPCSTR key);                    /* a folder's or program's icon again */
@@ -102,8 +118,12 @@ void   IconViewEditText(HWND iv, LPSTR out, int size);
 #define MIP_SELECTED    0x0001          /* MenuItemPaint flags */
 #define MIP_DISABLED    0x0002
 #define MIP_MNEMONIC    0x0004          /* the label has an &-prefixed access key */
-int    MenuItemWidth(LPCSTR label, BOOL mnemonic, BOOL large);
-void   MenuItemPaint(HDC dc, const RECT *r, HICON icon, BOOL large, LPCSTR label, UINT flags);
+#define MIP_LARGE       0x0008          /* a large icon */
+#define MIP_BOLD        0x0010
+#define MIP_PANE        0x0020          /* in the window colours (the two-column Start menu's left) */
+#define MIP_CENTER      0x0040          /* the label alone, centred */
+int    MenuItemWidth(LPCSTR label, UINT flags);
+void   MenuItemPaint(HDC dc, const RECT *r, HICON icon, LPCSTR label, UINT flags);
 BOOL   MenuItemMatchesKey(LPCSTR label, BOOL mnemonic, WPARAM key);   /* WM_MENUCHAR */
 
 /* ---- autocomplete.c: paths completed as typed (address bar, Run) ---- */
@@ -156,6 +176,7 @@ HICON  PlacesIcon(LPCSTR path);
 #define TABS_CLASS      "SbTabs"
 #define TCN_SELECT      1               /* WM_COMMAND notification: another tab */
 #define TABS_H          18              /* the strip of tabs; the panel is below */
+#define TABS_PAGES      5               /* pages a sheet can have (TabsShowPage) */
 BOOL   TabsRegister(void);
 BOOL   SheetButton(HWND dlg, UINT id, void (*apply)(HWND dlg));  /* OK, Apply, Cancel */
 void   TabsAdd(HWND tabs, LPCSTR label);

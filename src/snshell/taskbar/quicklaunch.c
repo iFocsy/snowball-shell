@@ -21,7 +21,7 @@ static HGLOBAL mem;
 static QLITEM FAR *items;
 static int count;
 static BOOL shown;
-static HWND hiddenBy[40];               /* what Show Desktop minimized, front first */
+static HWND hiddenBy[40];               /* what Show Desktop minimized, front first (MAX_TASKS) */
 static int nHidden;
 static int menuItem;                    /* the button whose menu is open */
 static RECT band;                       /* where the taskbar put it, its grip included */
@@ -46,7 +46,7 @@ static void FirstRun(LPCSTR dir)
 void QuickLaunchLoad(void)
 {
     char dir[MAX_PATH], spec[MAX_PATH], path[MAX_PATH];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
 
     shown = SettingsGetInt("Taskbar", "QuickLaunch", 1);
@@ -162,6 +162,13 @@ void QuickLaunchPaint(HDC dc, int hot, int pressed)
     }
 }
 
+#ifdef SNOWBALL_HOOKS
+int QuickLaunchCount(void)              /* the tests' hooks (src\hooks) */
+{
+    return count;
+}
+#endif
+
 void QuickLaunchName(int i, LPSTR out)
 {
     if (i == 0)
@@ -176,8 +183,7 @@ static void ItemPath(int i, LPSTR out)
     PathAppend(out, items[i].file);
 }
 
-/* Show Desktop: minimizes every program; again, it brings back those. */
-/* Every window minimized and remembered, or (when they still are) those
+/* Show Desktop: every window minimized and remembered, or (when they still are) those
    back as they were; SD_MINIMIZE and SD_RESTORE do only that (Win+M,
    Win+Shift+M). */
 void QuickLaunchShowDesktop(int how)
@@ -197,7 +203,8 @@ void QuickLaunchShowDesktop(int how)
         return;
     }
     nHidden = 0;
-    for (w = GetWindow(GetDesktopWindow(), GW_CHILD); w && nHidden < 40; w = GetWindow(w, GW_HWNDNEXT))
+    for (w = GetWindow(GetDesktopWindow(), GW_CHILD); w && nHidden < sizeof hiddenBy / sizeof hiddenBy[0];
+         w = GetWindow(w, GW_HWNDNEXT))
         if (TaskbarHasButton(w) && !IsIconic(w))
             hiddenBy[nHidden++] = w;
     TaskbarArrange(ARR_MINALL);
@@ -261,21 +268,19 @@ void QuickLaunchCommand(HWND owner, UINT cmd)
 void QuickLaunchAddFiles(HDROP drop)
 {
     char dir[MAX_PATH], file[MAX_PATH], to[MAX_PATH];
-    SHORTCUT *s = LocalHeapAlloc(sizeof(SHORTCUT));
+    SHORTCUT s;
     int i, n = DragQueryFile(drop, (UINT)-1, NULL, 0);
 
     Folder(dir);
-    for (i = 0; i < n && s; i++) {
+    for (i = 0; i < n; i++) {
         DragQueryFile(drop, i, file, sizeof file);
-        if (!lstrcmpi(PathExtension(file), SHC_EXT) && ShortcutRead(file, s)) {
+        if (PathIsShortcut(file) && ShortcutRead(file, &s)) {
             lstrcpy(to, dir);
             PathAppend(to, PathFileName(file));
-            ShortcutWrite(to, s);
+            ShortcutWrite(to, &s);
         } else {
             ShortcutCreate(file, dir, TRUE);
         }
     }
-    if (s)
-        LocalHeapFree(s);
     QuickLaunchLoad();
 }

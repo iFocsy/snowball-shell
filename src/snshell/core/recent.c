@@ -18,7 +18,7 @@ LPSTR RecentFolder(LPSTR out)
 static void Trim(LPCSTR dir)
 {
     char spec[MAX_PATH], oldest[MAX_PATH];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
     DWORD when, first;
     int n;
@@ -46,26 +46,25 @@ static void Trim(LPCSTR dir)
 void RecentAdd(LPCSTR document)
 {
     char dir[MAX_PATH], path[MAX_PATH];
-    SHORTCUT *s;                        /* large: not kept in the data segment */
+    SHORTCUT s;
 
     RecentFolder(dir);
     lstrcpy(path, dir);
     PathAppend(path, PathFileName((LPSTR)document));
-    if (lstrlen(path) + lstrlen(SHC_EXT) >= MAX_PATH || (!PathIsFolder(dir) && !DosMakeFolder(dir)) ||
-        (s = LocalHeapAlloc(sizeof(SHORTCUT))) == NULL)
+    if (lstrlen(path) + lstrlen(SHC_EXT) >= MAX_PATH || (!PathIsFolder(dir) && !DosMakeFolder(dir)))
         return;
     lstrcat(path, SHC_EXT);
-    lstrcpyn(s->target, document, sizeof s->target);
-    s->show = SW_SHOWNORMAL;
-    if (ShortcutWrite(path, s))
+    _fmemset(&s, 0, sizeof s);
+    lstrcpyn(s.target, document, sizeof s.target);
+    s.show = SW_SHOWNORMAL;
+    if (ShortcutWrite(path, &s))
         Trim(dir);
-    LocalHeapFree(s);
 }
 
 void RecentClear(void)
 {
     char dir[MAX_PATH], spec[MAX_PATH], path[MAX_PATH];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
 
     RecentFolder(dir);
@@ -84,7 +83,7 @@ void RecentClear(void)
 BOOL RecentIsEmpty(void)
 {
     char spec[MAX_PATH];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
 
     RecentFolder(spec);

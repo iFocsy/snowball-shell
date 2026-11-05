@@ -43,11 +43,22 @@ static BOOL Tiled(HWND w)
     return v->mode == IVM_LARGE && !v->dir[0] && !IconViewIsDesktop(w);
 }
 
+/* A scroll bar for 0..max pixels: Windows' range is 16-bit, so scaled down
+   by f past 32767 (IconViewScroll multiplies the thumb's place by it). */
+static void Bar(HWND w, int bar, long pos, long max)
+{
+    long f = max / 32767 + 1;
+
+    SetScrollRange(w, bar, 0, (int)(max / f), FALSE);
+    SetScrollPos(w, bar, (int)(pos / f), TRUE);
+}
+
 void IconViewLayout(HWND w)
 {
     VIEW *v = View(w);
     RECT r;
-    int extent = 0, page = 0, hextent = 0, hpage = 0, col;
+    long extent = 0, hextent = 0;
+    int hpage = 0, col;
 
     GetClientRect(w, &r);
     switch (v->mode) {
@@ -59,78 +70,93 @@ void IconViewLayout(HWND w)
         }
         v->cols = max(1, r.right / (Tiled(w) ? TILE_W : CELL_W));
         v->rows = (v->count + v->cols - 1) / v->cols;
-        extent = v->rows * (Tiled(w) ? TILE_H : CELL_H);
+        extent = (long)v->rows * (Tiled(w) ? TILE_H : CELL_H);
         break;
     case IVM_THUMBS:
         v->cols = max(1, r.right / THUMB_W);
         v->rows = (v->count + v->cols - 1) / v->cols;
-        extent = v->rows * THUMB_H + 4;
+        extent = (long)v->rows * THUMB_H + 4;
         break;
     case IVM_SMALL:
         v->cols = max(1, (r.right - 2) / SMALL_W);
         v->rows = (v->count + v->cols - 1) / v->cols;
-        extent = v->rows * ROW_H + 4;
+        extent = (long)v->rows * ROW_H + 4;
         break;
     case IVM_LIST:
         v->rows = max(1, (r.bottom - 4) / ROW_H);
         v->cols = (v->count + v->rows - 1) / v->rows;
-        hextent = v->cols * v->cellW + 4;
+        hextent = (long)v->cols * v->cellW + 4;
         hpage = r.right;
         break;
     case IVM_DETAILS:
-        extent = HEAD_H + v->count * ROW_H;
-        for (hextent = 0, col = 0; col < v->ncols; col++)
+        extent = HEAD_H + (long)v->count * ROW_H;
+        for (col = 0; col < v->ncols; col++)
             hextent += v->colW[col];
         hpage = r.right;
         break;
     }
-    page = r.bottom;
-    v->scroll = max(0, min(v->scroll, extent - page));
-    v->hscroll = max(0, min(v->hscroll, hextent - hpage));
-    SetScrollRange(w, SB_VERT, 0, max(0, extent - page), FALSE);
-    SetScrollPos(w, SB_VERT, v->scroll, TRUE);
-    SetScrollRange(w, SB_HORZ, 0, max(0, hextent - hpage), FALSE);
-    SetScrollPos(w, SB_HORZ, v->hscroll, TRUE);
+    v->vmax = max(0L, extent - r.bottom);
+    v->hmax = max(0L, hextent - hpage);
+    v->scroll = max(0L, min(v->scroll, v->vmax));
+    v->hscroll = max(0L, min(v->hscroll, v->hmax));
+    Bar(w, SB_VERT, v->scroll, v->vmax);
+    Bar(w, SB_HORZ, v->hscroll, v->hmax);
+}
+
+void IconViewCell(HWND w, int i, long *x, long *y, int *cx, int *cy)
+{
+    VIEW *v = View(w);
+    int col, row;
+
+    *cy = ROW_H;
+    switch (v->mode) {
+    case IVM_LARGE:
+        if (IconViewIsDesktop(w)) { col = i / v->rows; row = i % v->rows; }
+        else                      { col = i % v->cols; row = i / v->cols; }
+        *cx = Tiled(w) ? TILE_W : CELL_W;
+        *cy = Tiled(w) ? TILE_H : CELL_H;
+        *x = (long)col * *cx + (Tiled(w) ? 2 : 0);
+        *y = (long)row * *cy + 2;
+        return;
+    case IVM_THUMBS:
+        *cx = THUMB_W;
+        *cy = THUMB_H;
+        *x = (long)(i % v->cols) * THUMB_W + 2;
+        *y = (long)(i / v->cols) * THUMB_H + 2;
+        return;
+    case IVM_SMALL:
+        *cx = SMALL_W;
+        *x = (long)(i % v->cols) * SMALL_W + 2;
+        *y = (long)(i / v->cols) * ROW_H + 2;
+        return;
+    case IVM_LIST:
+        *cx = v->cellW;
+        *x = (long)(i / v->rows) * v->cellW + 2;
+        *y = (long)(i % v->rows) * ROW_H + 2;
+        return;
+    }
+    for (*cx = 0, col = 0; col < v->ncols; col++)
+        *cx += v->colW[col];
+    *x = 0;
+    *y = HEAD_H + (long)i * ROW_H;
+}
+
+/* Far off the window is far enough for a rectangle's 16 bits. */
+static int Px(long p)
+{
+    return p < -30000L ? -30000 : p > 30000L ? 30000 : (int)p;
 }
 
 void IconViewCellRect(HWND w, int i, RECT *r)
 {
     VIEW *v = View(w);
-    int col, row;
+    long x, y;
+    int cx, cy;
 
-    switch (v->mode) {
-    case IVM_LARGE:
-        if (IconViewIsDesktop(w)) { col = i / v->rows; row = i % v->rows; }
-        else              { col = i % v->cols; row = i / v->cols; }
-        if (Tiled(w)) {
-            SetRect(r, col * TILE_W + 2, row * TILE_H - v->scroll + 2, 0, 0);
-            r->right = r->left + TILE_W;
-            r->bottom = r->top + TILE_H;
-            return;
-        }
-        SetRect(r, col * CELL_W, row * CELL_H - v->scroll + 2, 0, 0);
-        r->right = r->left + CELL_W;
-        r->bottom = r->top + CELL_H;
-        return;
-    case IVM_THUMBS:
-        SetRect(r, (i % v->cols) * THUMB_W + 2, (i / v->cols) * THUMB_H - v->scroll + 2, 0, 0);
-        r->right = r->left + THUMB_W;
-        r->bottom = r->top + THUMB_H;
-        return;
-    case IVM_SMALL:
-        SetRect(r, (i % v->cols) * SMALL_W + 2, (i / v->cols) * ROW_H - v->scroll + 2, 0, 0);
-        r->right = r->left + SMALL_W;
-        break;
-    case IVM_LIST:
-        SetRect(r, (i / v->rows) * v->cellW - v->hscroll + 2, (i % v->rows) * ROW_H + 2, 0, 0);
-        r->right = r->left + v->cellW;
-        break;
-    default:
-        SetRect(r, -v->hscroll, HEAD_H + i * ROW_H - v->scroll, -v->hscroll, 0);
-        for (col = 0; col < v->ncols; col++)
-            r->right += v->colW[col];
-    }
-    r->bottom = r->top + ROW_H;
+    IconViewCell(w, i, &x, &y, &cx, &cy);
+    x -= v->hscroll;
+    y -= v->scroll;
+    SetRect(r, Px(x), Px(y), Px(x + cx), Px(y + cy));
 }
 
 /* The two parts that react to the mouse: the icon and the label. */
@@ -164,6 +190,37 @@ void IconViewPartRects(HWND w, int i, RECT *icon, RECT *label)
     SetRect(label, c.left + 20, c.top + 1, c.left + 20 + min(v->it[i].textW + 4, room), c.bottom - 1);
 }
 
+/* The item whose cell holds a point of the whole view (not scrolled), or -1:
+   the cells are a grid (IconViewCell's), so no item is looked at. */
+static int CellAt(HWND w, long x, long y)
+{
+    VIEW *v = View(w);
+    BOOL down = FALSE;                  /* items go down the columns (the desktop, List) */
+    long col, row;
+    int cx, cy, x0 = 2;
+
+    switch (v->mode) {
+    case IVM_LARGE:
+        cx = Tiled(w) ? TILE_W : CELL_W;
+        cy = Tiled(w) ? TILE_H : CELL_H;
+        x0 = Tiled(w) ? 2 : 0;
+        down = IconViewIsDesktop(w);
+        break;
+    case IVM_THUMBS: cx = THUMB_W; cy = THUMB_H; break;
+    case IVM_SMALL:  cx = SMALL_W; cy = ROW_H; break;
+    case IVM_LIST:   cx = v->cellW; cy = ROW_H; down = TRUE; break;
+    default:                            /* Details: rows */
+        return y < HEAD_H ? -1 : (int)min((y - HEAD_H) / ROW_H, 32767L);
+    }
+    if (x < x0 || y < 2)
+        return -1;
+    col = (x - x0) / cx;
+    row = (y - 2) / cy;
+    if (down)
+        return row < v->rows ? (int)min(col * v->rows + row, 32767L) : -1;
+    return col < v->cols ? (int)min(row * v->cols + col, 32767L) : -1;
+}
+
 int IconViewHitTest(HWND w, int x, int y)
 {
     VIEW *v = View(w);
@@ -173,25 +230,36 @@ int IconViewHitTest(HWND w, int x, int y)
 
     p.x = x;
     p.y = y;
-    if (v->mode == IVM_DETAILS && y < HEAD_H)
+    if ((v->mode == IVM_DETAILS && y < HEAD_H) || (i = CellAt(w, x + v->hscroll, y + v->scroll)) < 0 ||
+        i >= v->count)
         return -1;
-    for (i = 0; i < v->count; i++) {
-        IconViewPartRects(w, i, &icon, &label);
-        if (Tiled(w)) {                 /* a tile is one block: icon, name, bar */
-            IconViewCellRect(w, i, &label);
-            InflateRect(&label, -2, -2);
-        }
-        if (PtInRect(&icon, p) || PtInRect(&label, p))
-            return i;
+    IconViewPartRects(w, i, &icon, &label);
+    if (Tiled(w)) {                     /* a tile is one block: icon, name, bar */
+        IconViewCellRect(w, i, &label);
+        InflateRect(&label, -2, -2);
     }
-    return -1;
+    return PtInRect(&icon, p) || PtInRect(&label, p) ? i : -1;
 }
 
 /* ---- painting ---- */
 
 /* Large Icons label: at most two lines, ending in "..." when it does not
    fit; *box becomes the rectangle the text takes. */
-static void DrawLabel(HDC dc, LPCSTR text, RECT *box, BOOL selected, BOOL desktop)
+/* The names' font underlined: single-click's item pointed at. */
+static HFONT HotFont(void)
+{
+    static HFONT hot;
+    LOGFONT lf;
+
+    if (!hot) {
+        GetObject(DrawFont(FALSE), sizeof lf, &lf);
+        lf.lfUnderline = TRUE;
+        hot = CreateFontIndirect(&lf);
+    }
+    return hot ? hot : DrawFont(FALSE);
+}
+
+static void DrawLabel(HDC dc, LPCSTR text, RECT *box, BOOL selected, BOOL desktop, BOOL hot)
 {
     char buf[MAX_PATH + 4];
     RECT calc;
@@ -235,7 +303,7 @@ static void DrawLabel(HDC dc, LPCSTR text, RECT *box, BOOL selected, BOOL deskto
         DrawText(dc, buf, -1, &shadow, DT_WORDBREAK | DT_CENTER | DT_NOPREFIX);
         SetTextColor(dc, RGB(255, 255, 255));
     } else {
-        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        SetTextColor(dc, hot ? SkinColor(SC_HOTTRACK) : GetSysColor(COLOR_WINDOWTEXT));
     }
     DrawText(dc, buf, -1, &calc, DT_WORDBREAK | DT_CENTER | DT_NOPREFIX);
     *box = calc;
@@ -286,7 +354,7 @@ static void PaintHeader(HWND w, HDC dc)
 {
     VIEW *v = View(w);
     RECT r, c;
-    int col, x = -v->hscroll;
+    int col, x = (int)-v->hscroll;      /* (Details: as wide as its columns) */
 
     GetClientRect(w, &c);
     for (col = 0; col < v->ncols; col++) {
@@ -303,48 +371,27 @@ static void PaintHeader(HWND w, HDC dc)
    small one as it is), on the window's colour. */
 static HBITMAP MakeThumb(HDC dc, LPCSTR path)
 {
-    char shortPath[MAX_PATH];
-    BITMAPINFOHEADER FAR *bi;
-    BYTE huge *d;
-    HGLOBAL mem;
     HBITMAP bm = NULL, old;
-    HFILE h;
-    HDC mem_dc;
+    HDC mem;
     RECT box;
-    LONG size;
-    int w, ht, cw, ch;
+    DIB d;
+    int cw, ch;
 
-    DosShortPath(path, shortPath);
-    if ((h = _lopen(shortPath, OF_READ | OF_SHARE_DENY_NONE)) == HFILE_ERROR)
+    if (!DibLoad(path, &d))
         return NULL;
-    size = _llseek(h, 0, 2);
-    _llseek(h, 0, 0);
-    if (size < 54 || size > 0x400000L || (mem = GlobalAlloc(GMEM_MOVEABLE, size)) == NULL) {
-        _lclose(h);
-        return NULL;
-    }
-    d = (BYTE huge *)GlobalLock(mem);
-    bi = (BITMAPINFOHEADER FAR *)(d + 14);
-    if (_hread(h, (void huge *)d, size) == size && d[0] == 'B' && d[1] == 'M' && bi->biSize == 40 &&
-        bi->biWidth > 0 && bi->biHeight > 0) {
-        w = (int)bi->biWidth;
-        ht = (int)bi->biHeight;
-        cw = w <= THUMB && ht <= THUMB ? w : w >= ht ? THUMB : max(1, (int)((long)w * THUMB / ht));
-        ch = w <= THUMB && ht <= THUMB ? ht : w >= ht ? max(1, (int)((long)ht * THUMB / w)) : THUMB;
-        mem_dc = CreateCompatibleDC(dc);
-        bm = CreateCompatibleBitmap(dc, THUMB, THUMB);
-        old = SelectObject(mem_dc, bm);
+    cw = d.w <= THUMB && d.h <= THUMB ? d.w : d.w >= d.h ? THUMB : max(1, (int)((long)d.w * THUMB / d.h));
+    ch = d.w <= THUMB && d.h <= THUMB ? d.h : d.w >= d.h ? max(1, (int)((long)d.h * THUMB / d.w)) : THUMB;
+    if ((mem = CreateCompatibleDC(dc)) != NULL && (bm = CreateCompatibleBitmap(dc, THUMB, THUMB)) != NULL) {
+        old = SelectObject(mem, bm);
         SetRect(&box, 0, 0, THUMB, THUMB);
-        DrawSolidRect(mem_dc, &box, GetSysColor(COLOR_WINDOW));
-        SetStretchBltMode(mem_dc, COLORONCOLOR);
-        StretchDIBits(mem_dc, (THUMB - cw) / 2, (THUMB - ch) / 2, cw, ch, 0, 0, w, ht,
-                      (LPVOID)(d + *(DWORD FAR *)(d + 10)), (BITMAPINFO FAR *)bi, DIB_RGB_COLORS, SRCCOPY);
-        SelectObject(mem_dc, old);
-        DeleteDC(mem_dc);
+        DrawSolidRect(mem, &box, GetSysColor(COLOR_WINDOW));
+        SetStretchBltMode(mem, COLORONCOLOR);
+        DibDraw(mem, &d, (THUMB - cw) / 2, (THUMB - ch) / 2, cw, ch);
+        SelectObject(mem, old);
     }
-    _lclose(h);
-    GlobalUnlock(mem);
-    GlobalFree(mem);
+    if (mem)
+        DeleteDC(mem);
+    DibFree(&d);
     return bm;
 }
 
@@ -366,9 +413,12 @@ static void PaintThumb(HWND w, HDC dc, int i, const RECT *box, BOOL lit)
         InflateRect(&r, -1, -1);
         DrawFrame(dc, &r, GetSysColor(COLOR_BTNSHADOW), GetSysColor(COLOR_BTNSHADOW));
     }
-    if (!it->thumb && it->kind == IVK_FILE && IconViewItemPath(w, i, path) &&
-        !lstrcmpi(PathExtension(path), ".bmp"))
-        it->thumb = MakeThumb(dc, path);
+    if (!it->thumb && !(it->flags & IF_NOTHUMB)) {
+        if (it->kind == IVK_FILE && IconViewItemPath(w, i, path) && !lstrcmpi(PathExtension(path), ".bmp"))
+            it->thumb = MakeThumb(dc, path);
+        if (!it->thumb)                 /* not a picture, or a bad one: not tried at each paint */
+            it->flags |= IF_NOTHUMB;
+    }
     if (it->thumb) {
         mem_dc = CreateCompatibleDC(dc);
         old = SelectObject(mem_dc, it->thumb);
@@ -391,8 +441,7 @@ static void PaintTile(HWND w, HDC dc, int i, const RECT *cell, BOOL lit)
     VIEW *v = View(w);
     ITEM far *it = &v->it[i];
     char room[24], total[24], text[64];
-    RECT name, bar, block, all;
-    int used, x, step;
+    RECT name, bar, all;
 
     if (lit) {
         all = *cell;
@@ -405,15 +454,8 @@ static void PaintTile(HWND w, HDC dc, int i, const RECT *cell, BOOL lit)
     InflateRect(&name, -2, 0);
     DrawTextEllipsis(dc, v->pool + it->name, &name, DT_LEFT | DT_NOPREFIX | DT_VCENTER | DT_SINGLELINE);
     SetRect(&bar, cell->left + 46, cell->top + 23, cell->left + 46 + BAR_W, cell->top + 37);
-    DrawFrame(dc, &bar, GetSysColor(COLOR_BTNSHADOW), GetSysColor(COLOR_BTNHIGHLIGHT));
-    InflateRect(&bar, -1, -1);
-    DrawSolidRect(dc, &bar, GetSysColor(COLOR_BTNFACE));
-    used = (int)((it->size - it->free) / (it->size / 1000 + 1) * (bar.right - bar.left - 2) / 1000);
-    step = (bar.bottom - bar.top) * 2 / 3 + 2;
-    for (x = 0; x < used; x += step) {
-        SetRect(&block, bar.left + 1 + x, bar.top + 1, bar.left + 1 + min(x + step - 2, used), bar.bottom - 1);
-        DrawSolidRect(dc, &block, it->size - it->free >= it->size / 10 * 9 ? RGB(128, 0, 0) : GetSysColor(COLOR_HIGHLIGHT));
-    }
+    PaintProgressBar(dc, &bar, (int)((it->size - it->free) / (it->size / 1000 + 1)),
+                     it->size - it->free >= it->size / 10 * 9 ? RGB(128, 0, 0) : GetSysColor(COLOR_HIGHLIGHT));
     FormatSize(it->free, room);
     FormatSize(it->size, total);
     wsprintf(text, "%s free of %s", (LPSTR)room, (LPSTR)total);
@@ -447,6 +489,7 @@ void IconViewPaint(HWND w)
         if (!IntersectRect(&clip, &cell, &ps.rcPaint))
             continue;
         lit = (Sel(v, i) && (focused || !desktop)) || i == v->drop;
+        SelectObject(dc, i == v->hot && g_viewOptions.singleClick ? HotFont() : DrawFont(FALSE));
         if (Tiled(w)) {
             PaintTile(w, dc, i, &cell, lit);
             IconViewPartRects(w, i, &icon, &label);
@@ -467,7 +510,7 @@ void IconViewPaint(HWND w)
                 DrawIconImage(dc, x, cell.top, IconStock(IDI_ARROW), FALSE);
             SetRect(&label, cell.left + (CELL_W - LABEL_W) / 2, cell.top + 35,
                     cell.left + (CELL_W + LABEL_W) / 2, cell.bottom);
-            DrawLabel(dc, v->pool + v->it[i].name, &label, lit, desktop);
+            DrawLabel(dc, v->pool + v->it[i].name, &label, lit, desktop, i == v->hot && g_viewOptions.singleClick);
         } else {
             IconViewPartRects(w, i, &icon, &label);
             DrawIconImage(dc, icon.left, icon.top, ResolveIcon(w, i), TRUE);
@@ -475,7 +518,8 @@ void IconViewPaint(HWND w)
                 DrawIconImage(dc, icon.left, icon.top, IconStock(IDI_ARROW), TRUE);
             if (lit)
                 DrawSolidRect(dc, &label, GetSysColor(COLOR_HIGHLIGHT));
-            SetTextColor(dc, GetSysColor(lit ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+            SetTextColor(dc, lit ? GetSysColor(COLOR_HIGHLIGHTTEXT) : i == v->hot && g_viewOptions.singleClick ?
+                         SkinColor(SC_HOTTRACK) : GetSysColor(COLOR_WINDOWTEXT));
             InflateRect(&label, -2, 0);
             DrawTextEllipsis(dc, v->pool + v->it[i].name, &label, DT_LEFT | DT_NOPREFIX);
             InflateRect(&label, 2, 0);
@@ -492,7 +536,8 @@ void IconViewPaint(HWND w)
     EndPaint(w, &ps);
 }
 
-/* Name widths for the small modes, and the List column width. */
+/* Name widths for the small modes (each measured once: Find finishes its
+   view again and again), and the List column width. */
 void IconViewMeasure(HWND w)
 {
     VIEW *v = View(w);
@@ -503,7 +548,8 @@ void IconViewMeasure(HWND w)
 
     for (i = 0; i < v->count; i++) {
         name = v->pool + v->it[i].name;
-        v->it[i].textW = LOWORD(GetTextExtent(dc, name, lstrlen(name)));
+        if (!v->it[i].textW)
+            v->it[i].textW = LOWORD(GetTextExtent(dc, name, lstrlen(name)));
         widest = max(widest, v->it[i].textW);
     }
     SelectObject(dc, old);
@@ -517,7 +563,7 @@ void IconViewScroll(HWND w, BOOL horizontal, int code, int pos)
 {
     VIEW *v = View(w);
     RECT r;
-    int *at = horizontal ? &v->hscroll : &v->scroll, old = *at;
+    long *at = horizontal ? &v->hscroll : &v->scroll, old = *at, max = horizontal ? v->hmax : v->vmax;
     int line = !horizontal ? (v->mode == IVM_LARGE ? CELL_H / 2 : v->mode == IVM_THUMBS ? THUMB_H / 2 : ROW_H) : v->mode == IVM_LIST ? v->cellW : 20;
 
     GetClientRect(w, &r);
@@ -527,18 +573,20 @@ void IconViewScroll(HWND w, BOOL horizontal, int code, int pos)
     case SB_PAGEUP:        *at -= horizontal ? r.right : r.bottom; break;
     case SB_PAGEDOWN:      *at += horizontal ? r.right : r.bottom; break;
     case SB_THUMBTRACK:
-    case SB_THUMBPOSITION: *at = pos; break;
+    case SB_THUMBPOSITION: *at = (long)(WORD)pos * (max / 32767 + 1); break;     /* see Bar */
     default:               return;
     }
     IconViewLayout(w);
     if (*at == old)
         return;
     PostMessage(w, MSG_ENDEDIT, TRUE, 0L);
-    if (horizontal) {
-        ScrollWindow(w, old - *at, 0, NULL, NULL);
-    } else {
+    if (old - *at > 30000L || *at - old > 30000L)  /* beyond ScrollWindow's 16 bits */
+        InvalidateRect(w, NULL, TRUE);
+    else if (horizontal)
+        ScrollWindow(w, (int)(old - *at), 0, NULL, NULL);
+    else {
         if (v->mode == IVM_DETAILS)             /* the header stays */
             r.top = HEAD_H;
-        ScrollWindow(w, 0, old - *at, &r, &r);
+        ScrollWindow(w, 0, (int)(old - *at), &r, &r);
     }
 }

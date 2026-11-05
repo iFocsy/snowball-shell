@@ -21,6 +21,9 @@ void   TaskbarDragOver(const POINT FAR *screen);  /* a drag is there (NULL: ende
                                                      button brings its window forward */
 void   TaskbarDropOnTask(HWND owner, HWND task, HDROP drop);  /* NULL drop: only says it cannot */
 void   TaskbarApply(void);                        /* after Taskbar Properties */
+void   TaskbarResourceMeter(void);                /* System Tools' Resource Meter: in the tray */
+#define MAX_TRAY        6               /* [Tray]: programs shown by the clock */
+#define MAX_HIDDEN      16              /* [Hidden]: programs with no button */
 #define ARR_CASCADE     1               /* TaskbarArrange: the windows not minimized */
 #define ARR_TILEH       2
 #define ARR_TILEV       3
@@ -56,6 +59,14 @@ void SwitcherCommand(UINT what);                  /* SBM_SWITCH */
 void StartMenuShow(HWND owner, const RECT *button);   /* above the taskbar, by the Start button */
 BOOL StartMenuMessage(HWND w, UINT msg, WPARAM wp, LPARAM lp, LRESULT *res);
 void StartMenuFolder(LPSTR out);                  /* ...\Start Menu */
+void StartMenuBannerColors(COLORREF *top, COLORREF *bottom, COLORREF *text);   /* the scheme's */
+
+/* ---- startmenucolumns.c: the two-column Start menu's size ---- */
+#define PANE_W_MIN      160             /* [Taskbar] MenuWidth: its left pane's least width, */
+#define PANE_W_MAX      340             /* in steps */
+#define PANE_W_STEP     10
+int  StartMenuColumnsPrograms(void);              /* [Taskbar] MostUsed: how many of them it lists */
+int  StartMenuColumnsPaneWidth(void);
 
 /* ---- startmenuorder.c: the order the Start menu's items were dragged into ---- */
 int  StartMenuOrderPlace(LPCSTR path);            /* 1, 2...; 0: none, the usual order */
@@ -63,10 +74,31 @@ void StartMenuOrderSet(LPCSTR dir, PATHLIST *names);  /* file names in their ord
 void StartMenuOrderRename(LPCSTR from, LPCSTR to);   /* renamed or moved */
 void StartMenuOrderForget(LPCSTR dir);            /* Sort by Name */
 
-/* ---- programmanager.c: Program Manager's groups and DDE ---- */
+/* ---- programmanager.c: Program Manager's DDE, its items as shortcuts ---- */
+void ProgramManagerFolder(LPSTR out);             /* ...\Start Menu\Programs */
+void ProgramManagerItemName(LPCSTR dir, LPCSTR title, LPCSTR ext, int nth, LPSTR out);  /* nth 0: not taken */
+void ProgramManagerItemNameAs(LPCSTR dir, LPCSTR title, LPCSTR ext, int nth, BOOL longNames, LPSTR out);
+BOOL ProgramManagerWriteItem(LPCSTR dir, LPCSTR title, LPCSTR cmd, LPCSTR workDir,
+                             LPCSTR icon, int iconIndex, BOOL minimized, int nth);
 BOOL ProgramManagerAddItem(LPCSTR dir, LPCSTR title, LPCSTR cmd);  /* a shortcut, its name unique */
-BOOL ProgramManagerAddExplorer(LPCSTR dir);       /* "Windows Explorer" in dir */
-void ProgramManagerConvertGroups(void);           /* first run only */
 BOOL ProgramManagerServe(void);                   /* answer setup programs' DDE */
+
+/* ---- programgroups.c: Program Manager's .GRP files as Start menu folders ---- */
+BOOL ProgramManagerAddExplorer(LPCSTR dir);       /* "Windows Explorer" in dir */
+void ProgramManagerConvertGroups(void);           /* at start: a new Start menu's groups */
+void ProgramManagerSync(HWND owner);              /* groups new or changed since, then says so */
+BOOL ProgramManagerIsGroupFile(LPCSTR path);      /* a .GRP Program Manager wrote */
+BOOL ProgramManagerImportGroup(HWND owner, LPCSTR path);  /* asked first */
+
+/* ---- frequent.c: the two-column Start menu's pinned and most used ---- */
+#define FREQUENT_MAX    30              /* most used programs counted */
+void FrequentPinned(PATHLIST *l);
+BOOL FrequentIsPinned(LPCSTR path);
+void FrequentPin(LPCSTR path, BOOL on);
+void FrequentCount(LPCSTR path);                  /* a program started (LaunchItem) */
+void FrequentMostUsed(PATHLIST *l, int n);
+BOOL FrequentAnyUsed(void);
+void FrequentClear(void);                         /* the most used forgotten (Clear List) */
+void FrequentMenu(HWND owner, LPCSTR path);       /* such an item's right click */
 
 #endif

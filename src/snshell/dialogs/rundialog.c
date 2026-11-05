@@ -3,8 +3,6 @@
 
 #define HISTORY 10
 
-/* ---- Run ---- */
-
 static void LoadHistory(HWND combo)
 {
     char key[4], cmd[MAX_PATH];

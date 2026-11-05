@@ -31,6 +31,13 @@
 #define IDI_SHOWDESKTOP 24      /* the Desktop: Show Desktop, Desktop as Shortcut */
 #define IDI_MYDOCS      25      /* My Documents (MYDOCS.DLL's) */
 #define IDI_LAST        IDI_MYDOCS
+/* W98ART.DLL's other icons, ids 26 on (art\W98ART.TXT): those Snowball shows */
+#define IDI_DISPLAY     30      /* DESK.CPL's monitor: the Theme Manager */
+#define IDI_RESMETER    240     /* RSRCMTR.EXE's */
+#define IDI_METER       241     /* ... its tray icon full; + 1 to 12 lower, + 12 empty */
+#define IDI_MUTED       257     /* SNDVOL32.EXE's tray speaker, muted */
+#define IDI_SPEAKER     258
+#define IDI_ART_LAST    258
 
 /* Bitmaps */
 #define IDB_STARTFLAG   100     /* the Start button's 16x16 flag, magenta = transparent */
@@ -86,6 +93,14 @@
 #define IDD_FILETYPE    221     /* Edit File Type, Add New File Type */
 #define IDD_FILEACTION  222     /* its New Action, Edit Action */
 #define IDD_BINPROPS    223     /* Recycle Bin Properties */
+#define IDD_VOLUME      224     /* the tray's volume slider */
+#define IDD_RESMETER    225     /* Resource Meter */
+#define IDD_FORMAT      226     /* Format (a floppy) */
+#define IDD_CLEANUP     227     /* Disk Cleanup */
+#define IDD_LOWDISK     228     /* the low disk space warning */
+#define IDD_DATETIME    229     /* Date/Time Properties */
+#define IDD_STARTSIZE   230     /* Customize Start Menu (the two-column one's size) */
+#define IDD_THEMES      231     /* Theme Manager */
 
 #define IDC_COMMAND     300
 #define IDC_BROWSE      301
@@ -106,6 +121,22 @@
 #define IDC_CHANGEICON_FILE      410     /* Change Icon */
 #define IDC_CHANGEICON_BROWSE    411
 #define IDC_CHANGEICON_LIST      412
+#define IDC_SMC_ICON       414     /* Customize Start Menu */
+#define IDC_SMC_COUNT      415     /* [Taskbar] MostUsed */
+#define IDC_SMC_CLEAR      416
+#define IDC_SMC_WIDTH      417     /* [Taskbar] MenuWidth */
+#define IDC_TM_LISTL       660     /* Theme Manager: the list and its buttons */
+#define IDC_TM_LIST        661
+#define IDC_TM_NEW         662
+#define IDC_TM_COPY        663
+#define IDC_TM_RENAME      664
+#define IDC_TM_DELETE      665
+#define IDC_TM_GROUP       666
+#define IDC_TM_IMPORT      667
+#define IDC_TM_EXPORT      668
+#define IDC_TM_DEFAULTS    669
+#define IDC_TM_PARTS       670     /* the parts to apply: */
+#define IDC_TM_PART        671     /* ..676, a check box per THEME_* bit */
 #define IDC_GOTO_PATH      420     /* Go To Folder */
 #define IDC_PROMPT_LABEL   424     /* a name asked for */
 #define IDC_PROMPT_TEXT    425
@@ -194,6 +225,7 @@
 #define IDC_DRIVE_CAPS      1029
 #define IDC_DRIVE_PIE       1030
 #define IDC_DRIVE_DRIVE     1031
+#define IDC_DRIVE_CLEANUP   1032
 #define IDC_COMPUTER_SYSTEM    1035    /* My Computer */
 #define IDC_COMPUTER_VERSION   1036
 #define IDC_COMPUTER_SHELL     1037
@@ -246,6 +278,8 @@
 #define IDC_ABOUT_LINK        191
 #define IDC_TASKBAR_ICONSONLY 1006    /* [Taskbar] IconsOnly */
 #define IDC_TASKBAR_GROUPED   1007    /* [Taskbar] Group */
+#define IDC_TASKBAR_COLUMNS   1008    /* [Taskbar] TwoColumns: the Start menu's */
+#define IDC_TASKBAR_CUSTOMIZE 1009    /* its size: IDD_STARTSIZE */
 #define IDC_TASKBAR_GROUP     1050    /* Start Menu Programs */
 #define IDC_TASKBAR_ICON      1051
 #define IDC_TASKBAR_TEXT      1052
@@ -255,6 +289,8 @@
 #define IDC_TASKBAR_DOCGROUP  1056
 #define IDC_TASKBAR_DOCTEXT   1057
 #define IDC_TASKBAR_CLEAR     1058
+#define IDC_TASKBAR_SYNCTEXT  1059
+#define IDC_TASKBAR_SYNC      1060    /* Program Manager's groups */
 #define IDC_BIN_NOMOVE        1000    /* Recycle Bin Properties: Global */
 #define IDC_BIN_SLIDER        1001
 #define IDC_BIN_PERCENT       1002
@@ -275,9 +311,17 @@
 #define IDC_FOLDEROPTIONS_BROWSE    1000    /* General: Browse folders as follows */
 #define IDC_FOLDEROPTIONS_SAME      1001
 #define IDC_FOLDEROPTIONS_OWN       1002
+#define IDC_FOLDEROPTIONS_CLICK     1003    /* Click items as follows */
+#define IDC_FOLDEROPTIONS_SINGLE    1004
+#define IDC_FOLDEROPTIONS_DOUBLE    1005
 #define IDC_FOLDEROPTIONS_LABEL     1050    /* View */
 #define IDC_FOLDEROPTIONS_LIST      1051
 #define IDC_FOLDEROPTIONS_DEFAULTS  1052
+#define IDC_FOLDEROPTIONS_VIEWS     1053    /* Folder views: Like Current Folder, Reset All Folders */
+#define IDC_FOLDEROPTIONS_VIEWICON  1054
+#define IDC_FOLDEROPTIONS_VIEWTEXT  1055
+#define IDC_FOLDEROPTIONS_LIKE      1056
+#define IDC_FOLDEROPTIONS_RESET     1057
 #define IDC_FILETYPES_LABEL         1100    /* File Types */
 #define IDC_FILETYPES_LIST          1101
 #define IDC_FILETYPES_NEW           1102
@@ -313,15 +357,76 @@
 #define IDC_AP_COLOR          1107
 #define IDC_AP_TEXTL          1108
 #define IDC_AP_TEXT           1109
-#define IDC_ST_DISPLAYL       1150    /* Settings */
-#define IDC_ST_DISPLAY        1151
-#define IDC_ST_COLORSG        1152
-#define IDC_ST_COLORS         1153
-#define IDC_ST_AREAG          1154
-#define IDC_ST_AREA           1155
-#define IDC_ST_LESS           1156
-#define IDC_ST_MORE           1157
-#define IDC_ST_AREATEXT       1158
+#define IDC_AP_COLOR2L        1110
+#define IDC_AP_COLOR2         1111
+#define IDC_AP_THEMES         1112    /* opens the Theme Manager */
+#define IDC_TM_PICTURE        1000    /* Theme Manager: Preview (hidden: painted) */
+#define IDC_TM_SUMMARY        1001
+#define IDC_TM_HASCOLORS      1050    /* Colors */
+#define IDC_TM_COLORLIST      1051
+#define IDC_TM_CHANGE         1052
+#define IDC_TM_COLORHINT      1053
+#define IDC_TM_HASWALL        1100    /* Desktop */
+#define IDC_TM_WALLNAME       1101
+#define IDC_TM_WALLBROWSE     1102
+#define IDC_TM_WALLNONE       1103
+#define IDC_TM_WALLSTYLE      1104
+#define IDC_TM_HASSAVER       1105
+#define IDC_TM_SAVER          1106
+#define IDC_TM_HASICONS       1107
+#define IDC_TM_ICONLIST       1108
+#define IDC_TM_ICONCHANGE     1109
+#define IDC_TM_ICONDEFAULT    1110
+#define IDC_TM_HASSOUNDS      1150    /* Sounds */
+#define IDC_TM_SOUNDLIST      1151
+#define IDC_TM_SOUNDBROWSE    1152
+#define IDC_TM_SOUNDPLAY      1153
+#define IDC_TM_SOUNDNONE      1154
+#define IDC_TM_HASPOINTERS    1200    /* Pointers */
+#define IDC_TM_POINTERLIST    1201
+#define IDC_TM_POINTERBROWSE  1202
+#define IDC_TM_POINTERDEFAULT 1203
+#define SLS_VERTICAL          0x0001  /* SbSlider up and down, its top the last position */
+#define IDC_VOLUME_SLIDER     600
+#define IDC_VOLUME_MUTE       601
+#define IDC_RESMETER_BAR      610     /* + 0..2: System, User, GDI */
+#define IDC_RESMETER_FREE     615     /* + 0..2 */
+#define IDC_FORMAT_CAPACITY   620
+#define IDC_FORMAT_QUICK      621
+#define IDC_FORMAT_FULL       622
+#define IDC_FORMAT_SYSONLY    623
+#define IDC_FORMAT_LABEL      624
+#define IDC_FORMAT_NOLABEL    625
+#define IDC_FORMAT_SYS        626
+#define IDC_CLEANUP_DRIVE     630
+#define IDC_CLEANUP_ICON      631
+#define IDC_CLEANUP_TEXT      632
+#define IDC_CLEANUP_LIST      633
+#define IDC_CLEANUP_TOTAL     634
+#define IDC_CLEANUP_ABOUT     635
+#define IDC_LOWDISK_ICON      636
+#define IDC_LOWDISK_TEXT      637
+#define IDC_DT_MONTH          640
+#define IDC_DT_YEAR           641
+#define IDC_DT_CALENDAR       642
+#define IDC_DT_CLOCK          643
+#define IDC_DT_TIME           644
+#define IDC_EF_GROUP          1150    /* Effects */
+#define IDC_EF_ANIMATE        1151
+#define IDC_EF_SKIN           1152
+#define IDC_EF_SHELL          1153
+#define IDC_EF_RESGROUP       1154    /* USERX.DRV, GDIX.DRV */
+#define IDC_EF_RESOURCES      1155
+#define IDC_EF_RESNOTE        1156
+#define IDC_ST_DISPLAYL       1200    /* Settings */
+#define IDC_ST_DISPLAY        1201
+#define IDC_ST_COLORSG        1202
+#define IDC_ST_COLORS         1203
+#define IDC_ST_AREAG          1204
+#define IDC_ST_AREA           1205
+#define IDC_ST_LESS           1206
+#define IDC_ST_MORE           1207
+#define IDC_ST_AREATEXT       1208
 
 /* The Create Shortcut wizard's pages */
 #define IDC_WIZARD_TEXT1     1000

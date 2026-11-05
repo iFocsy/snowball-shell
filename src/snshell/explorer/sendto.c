@@ -9,7 +9,6 @@
 #include "internal.h"
 
 static PATHLIST items;                  /* the menu filled last: CMD_SENDTO + i */
-static SHORTCUT s;                      /* large: one for the module */
 
 static void Folder(LPSTR out)
 {
@@ -21,6 +20,7 @@ static void Folder(LPSTR out)
 static void Setup(LPCSTR dir)
 {
     char path[MAX_PATH];
+    SHORTCUT s;
 
     if (!DosMakeFolder(dir))
         return;
@@ -53,7 +53,7 @@ static int CompareNames(const void far *a, const void far *b)
 static void Fill(HMENU m)
 {
     char dir[MAX_PATH], path[MAX_PATH];
-    static DOSENTRY f;
+    DOSENTRY f;
     LPSTR order[MAX_SENDTO], p;
     PATHLIST found;
     DOSFIND find;
@@ -96,13 +96,7 @@ static void Fill(HMENU m)
 /* The path and label of the item of a command. */
 static BOOL Item(UINT cmd, LPSTR path, LPSTR label)
 {
-    int i = cmd - CMD_SENDTO;
-    LPSTR p = PathListLock(&items);
-
-    for (; *p && i > 0; i--)
-        p = PathListNext(p);
-    lstrcpy(path, p);
-    PathListUnlock(&items);
+    PathListAt(&items, cmd - CMD_SENDTO, path);
     if (label)
         DisplayNameOfFile(PathFileName(path), label);
     return *path != '\0';
@@ -120,6 +114,15 @@ HMENU SendToMenu(void)
     return m;
 }
 
+#ifdef SNOWBALL_HOOKS
+BOOL SendToItemLabel(UINT cmd, LPSTR label)     /* the tests' hooks (src\hooks) */
+{
+    char path[MAX_PATH];
+
+    return Item(cmd, path, label);
+}
+#endif
+
 BOOL SendToIsMenu(HMENU m)
 {
     UINT id = m ? GetMenuItemID(m, 0) : 0;
@@ -134,6 +137,7 @@ BOOL SendToMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT *res)
     HMENU m = (HMENU)HIWORD(lp);
     int i;
 
+    HOOK_DESCRIBE_MENU_RES(msg, res, SendToDescribeMenu((HMENU)wp, (LPSTR)lp));
     switch (msg) {
     case WM_INITMENUPOPUP:
         if (!SendToIsMenu((HMENU)wp))
@@ -146,14 +150,14 @@ BOOL SendToMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT *res)
             return FALSE;
         Item(mi->itemID, path, label);
         mi->itemHeight = MENUITEM_H;
-        mi->itemWidth = MenuItemWidth(label, FALSE, FALSE);
+        mi->itemWidth = MenuItemWidth(label, 0);
         *res = TRUE;
         return TRUE;
     case WM_DRAWITEM:
         if (!IsItem(di->CtlType, di->itemID))
             return FALSE;
         Item(di->itemID, path, label);
-        MenuItemPaint(di->hDC, &di->rcItem, IconForFile(path, PathIsFolder(path)), FALSE, label,
+        MenuItemPaint(di->hDC, &di->rcItem, IconForFile(path, PathIsFolder(path)), label,
                       di->itemState & ODS_SELECTED ? MIP_SELECTED : 0);
         *res = TRUE;
         return TRUE;
@@ -183,8 +187,8 @@ void SendToRun(HWND owner, PATHLIST *files, UINT cmd)
         effect = DE_LINK;
     } else if (LaunchIsProgram(item)) {
         effect = DE_RUN;                        /* the program, or its shortcut, opens them */
-    } else if (PathIsShortcut(item) && ShortcutRead(item, &s)) {
-        lstrcpy(target, s.target);
+    } else if (PathIsShortcut(item)) {
+        ShortcutTarget(item, target);
     }
     if (effect == DE_RUN || effect == DE_LINK || PathIsFolder(target))
         FileCommandsDrop(owner, target, IVK_FOLDER, files, effect);

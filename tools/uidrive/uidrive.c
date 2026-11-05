@@ -43,7 +43,8 @@
  *                               DDEML execute, e.g. dde PROGMAN PROGMAN [CreateGroup(X)]
  *   ddereq <service> <topic> <item>
  *                               DDEML request, the text answer goes to the log
- *   snap <file> [class]         screenshot to a 24-bit BMP: the whole screen, or that window
+ *   snap <file> [class]         screenshot to a 24-bit BMP: the whole screen, or that window;
+ *                               its facts (facts.c: the same in words) beside it as .TXT
  *   windows [all]               log the visible (all: also hidden) top-level windows
  *   mem                         log free memory (KB) and free system, GDI, USER resources (%)
  *   cpu <ms>                    count rounds of plain work for that long: fewer when
@@ -730,7 +731,7 @@ static void repaint(HWND w)
 
 /* The blocks in use in GDI's and USER's heaps (ToolHelp), [0] GDI's and
    [1] USER's, all and by ToolHelp's type of block (LT_GDI_*, LT_USER_*). */
-#define HEAP_TYPES 32
+#define HEAP_TYPES 40
 typedef struct { WORD all, type[HEAP_TYPES]; } HEAPCOUNT;
 
 static void heap_blocks(HEAPCOUNT *c)
@@ -752,6 +753,84 @@ static void heap_blocks(HEAPCOUNT *c)
                 c[i].type[le.wType < HEAP_TYPES ? le.wType : 0]++;
             }
     }
+}
+
+/* "gdi used n bytes in b blocks, free f, segment s: t1 bytes/blocks ...":
+   GDI's and USER's heaps by ToolHelp's types of block. */
+/* One local heap: bytes in use, free, the segment's size, by ToolHelp's types. */
+static void heap_one(FILE *out, const char *name, HGLOBAL seg)
+{
+    LOCALENTRY le;
+    DWORD bytes[HEAP_TYPES], used = 0, unused = 0;
+    WORD blocks[HEAP_TYPES], n = 0;
+    BOOL more;
+    int t;
+
+    memset(bytes, 0, sizeof bytes);
+    memset(blocks, 0, sizeof blocks);
+    le.dwSize = sizeof le;
+    for (more = LocalFirst(&le, seg); more; more = LocalNext(&le)) {
+        if (le.wFlags & LF_FREE) {
+            unused += le.wSize;
+            continue;
+        }
+        t = le.wType < HEAP_TYPES ? le.wType : 0;
+        bytes[t] += le.wSize;
+        blocks[t]++;
+        used += le.wSize;
+        n++;
+    }
+    fprintf(out, "  %s %04X used %lu bytes in %u blocks, free %lu, segment %lu:", name, (WORD)seg, used, n, unused,
+            GlobalSize(seg));
+    for (t = 0; t < HEAP_TYPES; t++)
+        if (blocks[t])
+            fprintf(out, " t%d %lu/%u", t, bytes[t], blocks[t]);
+    fprintf(out, "\n");
+}
+
+/* Every local heap of USER and GDI (USER has three: its own, menus', and
+   the text of menus and windows), found in the global heap. */
+static void heap_use(FILE *out)
+{
+    HMODULE user = GetModuleHandle("USER"), gdi = GetModuleHandle("GDI");
+    static GLOBALENTRY ge;
+    BOOL more;
+
+    HMODULE userx = GetModuleHandle("USERX");
+    HMODULE gdix = GetModuleHandle("GDIX");
+    DWORD (FAR PASCAL *status)(void);
+    DWORD s;
+
+    ge.dwSize = sizeof ge;
+    for (more = GlobalFirst(&ge, GLOBAL_ALL); more; more = GlobalNext(&ge, GLOBAL_ALL))
+        if (ge.wHeapPresent && (ge.hOwner == user || ge.hOwner == gdi))
+            heap_one(out, ge.hOwner == user ? "user" : "gdi", ge.hBlock);
+    /* the resource extender's USER driver: menus it keeps, bytes they take */
+    if (userx && (status = (DWORD (FAR PASCAL *)(void))GetProcAddress(userx, "USERXSTATUS")) != NULL) {
+        s = status();
+        fprintf(out, "  userx %u menus saved, %u bytes\n", LOWORD(s), HIWORD(s));
+    }
+    /* and its GDI driver: brushes it keeps, bytes they take */
+    if (gdix && (status = (DWORD (FAR PASCAL *)(void))GetProcAddress(gdix, "GDIXSTATUS")) != NULL) {
+        s = status();
+        fprintf(out, "  gdix %u brushes kept, %u bytes\n", LOWORD(s), HIWORD(s));
+    }
+}
+
+/* A sum of the shape of one of Windows' own cursors (its header and masks). */
+static unsigned shape_sum(LPCSTR id)
+{
+    HCURSOR c = LoadCursor(NULL, id);
+    BYTE FAR *p = c ? GlobalLock((HGLOBAL)c) : NULL;
+    unsigned sum = 0;
+    int i;
+
+    if (!p)
+        return 0;
+    for (i = 0; i < 268; i++)
+        sum = sum * 31 + p[i];
+    GlobalUnlock((HGLOBAL)c);
+    return sum;
 }
 
 /* "gdi +1 (type 3 +1), user +0": what grew since mark, the types that did. */
@@ -940,6 +1019,20 @@ static void snap(const char *file, HWND win)
     ReleaseDC(NULL, sdc);
 }
 
+void facts_write(const char *file, HWND win);   /* facts.c */
+
+/* A screenshot's facts: the same name, .TXT. */
+static void snap_facts(const char *bmp, HWND win)
+{
+    char txt[164], *dot;
+
+    lstrcpyn(txt, bmp, 160);
+    if ((dot = strrchr(txt, '.')) != NULL)
+        *dot = '\0';
+    lstrcat(txt, ".TXT");
+    facts_write(txt, win);
+}
+
 HDDEDATA CALLBACK __export dde_cb(UINT type, UINT fmt, HCONV conv, HSZ s1, HSZ s2,
                                  HDDEDATA data, DWORD d1, DWORD d2)
 {
@@ -1078,6 +1171,52 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int show)
                     hwmouse(w, a, b, r[0] == 'r' ? 16 : 4);
                 }
             }
+        } else if (!strcmp(verb, "cursorstats")) { /* the debug VBESVGA.DRV's counters: cursorstats <hex offset> <words> */
+            unsigned at; int words;
+            if (sscanf(arg, "%x %d", &at, &words) == 2) {
+                char path[144];
+                HINSTANCE inst;
+                GetModuleFileName(GetModuleHandle("DISPLAY"), path, sizeof path);
+                inst = LoadLibrary(path);
+                if ((UINT)inst >= 32) {
+                    UINT sel = SELECTOROF(GlobalLock((HGLOBAL)inst));
+                    for (a = 0; a < words; a++)
+                        fprintf(out, " %u", *(WORD FAR *)MAKELP(sel, at + 2 * a));
+                    fprintf(out, "\n");
+                    GlobalUnlock((HGLOBAL)inst);
+                    FreeLibrary(inst);
+                }
+            }
+        } else if (!strcmp(verb, "hwjitter")) {    /* moved around x,y: rate times a second, for ms */
+            int rate, ms;
+            if (sscanf(arg, "%63s %d %d %d %d", cls, &a, &b, &rate, &ms) == 5 && (w = find_window(cls)) != NULL) {
+                DWORD start = timeGetTime(), n = 0;
+                while (timeGetTime() - start < (DWORD)ms) {
+                    MSG m;
+                    hwmouse(w, a + (int)(n & 7), b + (int)((n >> 1) & 3), 0);
+                    n++;
+                    while (timeGetTime() - start < n * 1000L / rate)
+                        if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) {  /* other programs get their messages */
+                            TranslateMessage(&m);
+                            DispatchMessage(&m);
+                        }
+                }
+                fprintf(out, "  %lu moves\n", n);
+            }
+        } else if (!strcmp(verb, "drawspin")) {    /* white drawn on the screen: rate times a second, for ms */
+            int dx, dy, dw, dh, rate, ms;
+            if (sscanf(arg, "%d %d %d %d %d %d", &dx, &dy, &dw, &dh, &rate, &ms) == 6) {
+                HDC screen = GetDC(NULL);
+                DWORD start = timeGetTime(), n = 0;
+                while (timeGetTime() - start < (DWORD)ms) {
+                    PatBlt(screen, dx, dy, dw, dh, WHITENESS);
+                    n++;
+                    while (timeGetTime() - start < n * 1000L / rate)
+                        ;
+                }
+                ReleaseDC(NULL, screen);
+                fprintf(out, "  %lu draws\n", n);
+            }
         } else if (!strcmp(verb, "items")) {       /* a combo box's or list box's entries */
             if (sscanf(arg, "%63s %d", cls, &a) >= 1 && (w = find_window(cls)) != NULL) {
                 char item[128];
@@ -1168,12 +1307,15 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int show)
         } else if (!strcmp(verb, "snap")) {
             cls[0] = '\0';
             if (sscanf(arg, "%159s %63s", line, cls) == 2) {
-                if ((w = find_window(cls)) != NULL)
+                if ((w = find_window(cls)) != NULL) {
                     snap(line, w);
-                else
+                    snap_facts(line, w);
+                } else {
                     fail("no %s to snap", cls);
+                }
             } else {
                 snap(arg, NULL);
+                snap_facts(arg, NULL);
             }
         } else if (!strcmp(verb, "waitfor")) {
             DWORD most;
@@ -1230,6 +1372,10 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int show)
                 } while (titled && GetTickCount() - start < most);
                 fprintf(out, "  %s after %lu ms\n", titled ? "still there" : "gone", GetTickCount() - start);
             }
+        } else if (!strcmp(verb, "cursors")) {
+            fprintf(out, "  arrow %u, ibeam %u, wait %u\n", shape_sum(IDC_ARROW), shape_sum(IDC_IBEAM), shape_sum(IDC_WAIT));
+        } else if (!strcmp(verb, "heapuse")) {
+            heap_use(out);
         } else if (!strcmp(verb, "mem")) {
             fprintf(out, "  free %lu KB, system %u%%, gdi %u%%, user %u%%\n", GetFreeSpace(0) / 1024,
                     GetFreeSystemResources(GFSR_SYSTEMRESOURCES), GetFreeSystemResources(GFSR_GDIRESOURCES),

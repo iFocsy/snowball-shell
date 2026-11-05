@@ -1,5 +1,8 @@
 /* About Snowball: Windows 98's look, a banner over the text. */
 #include "internal.h"
+#include "commit.h"                     /* SB_COMMIT, written by build.ps1 */
+
+#define LINK    "github.com/iFocsy/snowball-shell"
 
 /* The banner: the gradient of an active caption, the big icon, the name
    large and bold, the version; and an etched line over the memory. */
@@ -11,9 +14,7 @@ static void Paint(HWND dlg, HDC dc)
 
     if (!big)
         big = CreateFont(-24, 0, 0, 0, FW_BOLD, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, VARIABLE_PITCH | FF_SWISS, "MS Sans Serif");
-    GetWindowRect(GetDlgItem(dlg, IDC_ABOUT_BANNER), &r);
-    ScreenToClient(dlg, (POINT FAR *)&r.left);
-    ScreenToClient(dlg, (POINT FAR *)&r.right);
+    WindowRectIn(GetDlgItem(dlg, IDC_ABOUT_BANNER), dlg, &r);
     DrawGradient(dc, &r, RGB(0, 0, 128), RGB(16, 132, 208), FALSE);
     DrawIcon(dc, r.left + 12, r.top + (r.bottom - r.top - 32) / 2, LoadIcon(g_hArt, MAKEINTRESOURCE(IDI_SNOWBALL)));
     SetBkMode(dc, TRANSPARENT);
@@ -26,14 +27,12 @@ static void Paint(HWND dlg, HDC dc)
     t.right -= 10;
     t.bottom -= 4;
     DrawText(dc, SB_VERSION, -1, &t, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
-    GetWindowRect(GetDlgItem(dlg, IDC_ABOUT_LINK), &t);     /* the link, blue and underlined */
-    ScreenToClient(dlg, (POINT FAR *)&t.left);
-    ScreenToClient(dlg, (POINT FAR *)&t.right);
+    WindowRectIn(GetDlgItem(dlg, IDC_ABOUT_LINK), dlg, &t);     /* the link, blue and underlined */
     SetTextColor(dc, RGB(0, 0, 255));
-    DrawText(dc, "github.com/iFocsy/snowball-shell", -1, &t, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+    DrawText(dc, LINK, -1, &t, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
     { TEXTMETRIC tm; GetTextMetrics(dc, &tm); t.top += tm.tmAscent + 1; }
     t.bottom = t.top + 1;
-    t.right = t.left + LOWORD(GetTextExtent(dc, "github.com/iFocsy/snowball-shell", 32));
+    t.right = t.left + LOWORD(GetTextExtent(dc, LINK, sizeof LINK - 1));
     DrawSolidRect(dc, &t, RGB(0, 0, 255));
     SelectObject(dc, old);
     GetWindowRect(GetDlgItem(dlg, IDC_INFO), &t);
@@ -55,7 +54,7 @@ BOOL CALLBACK __export AboutDialogProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         ShowWindow(GetDlgItem(dlg, IDC_ABOUT_LINK), SW_HIDE);
         SkinDialog(dlg);
         WindowCenter(dlg);
-        wsprintf(text, "Version %s (16-bit, for Windows 3.1 and 3.11)", (LPSTR)SB_VERSION);
+        wsprintf(text, "Version %s (16-bit, for Windows 3.1 and 3.11)\nCommit %s", (LPSTR)SB_VERSION, (LPSTR)SB_COMMIT);
         SetDlgItemText(dlg, IDC_VERSION, text);
         wsprintf(text, "Memory: %lu KB free\nSystem resources: %u%% free",
                  GetFreeSpace(0) / 1024, GetFreeSystemResources(GFSR_SYSTEMRESOURCES));

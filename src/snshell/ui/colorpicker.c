@@ -145,23 +145,65 @@ static BOOL Other(HWND owner, COLORREF FAR *c)
     return TRUE;
 }
 
+/* Arrows move the frame, Enter takes its colour, Esc cancels: FALSE ends the palette. */
+static BOOL PaletteKey(WPARAM key, int *chosen)
+{
+    switch (key) {
+    case VK_ESCAPE: return FALSE;
+    case VK_RETURN: *chosen = hot; return FALSE;
+    case VK_LEFT:   hot = max(0, hot - 1); break;
+    case VK_RIGHT:  hot = min(COLS * ROWS, hot + 1); break;
+    case VK_UP:     hot = hot == COLS * ROWS ? COLS * (ROWS - 1) : max(0, hot - COLS); break;
+    case VK_DOWN:   hot = min(COLS * ROWS, hot + COLS); break;
+    }
+    return TRUE;
+}
+
+/* One message while the palette has the mouse: a click on a colour takes
+   it, a press anywhere else cancels; paint and timers go on, other input
+   stays with the palette. FALSE ends it. */
+static BOOL PaletteMessage(HWND w, MSG *msg, int *chosen)
+{
+    RECT r;
+    int i;
+
+    switch (msg->message) {
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+        GetWindowRect(w, &r);
+        return PtInRect(&r, msg->pt);
+    case WM_LBUTTONUP:
+        ScreenToClient(w, &msg->pt);
+        if ((i = CellAt(msg->pt.x, msg->pt.y)) < 0)
+            return TRUE;
+        *chosen = i;
+        return FALSE;
+    case WM_MOUSEMOVE:
+        ScreenToClient(w, &msg->pt);
+        if ((i = CellAt(msg->pt.x, msg->pt.y)) >= 0 && i != hot) {
+            hot = i;
+            InvalidateRect(w, NULL, FALSE);
+        }
+        return TRUE;
+    case WM_KEYDOWN:
+        InvalidateRect(w, NULL, FALSE);
+        return PaletteKey(msg->wParam, chosen);
+    }
+    if (msg->message < WM_KEYFIRST || msg->message > WM_MOUSELAST)
+        DispatchMessage(msg);
+    return TRUE;
+}
+
 BOOL ColorPickerChoose(HWND button, COLORREF FAR *c)
 {
     static BOOL registered;
-    WNDCLASS wc;
     RECT b, r;
     HWND w;
     MSG msg;
-    int i, chosen = -1;
-    BOOL done = FALSE;
+    int chosen = -1;
 
     if (!registered) {
-        _fmemset(&wc, 0, sizeof wc);
-        wc.lpfnWndProc = ColorPickerPaletteProc;
-        wc.hInstance = g_hInst;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = PALETTE_CLASS;
-        registered = RegisterClass(&wc);
+        registered = WindowRegister(PALETTE_CLASS, ColorPickerPaletteProc, 0, 0, NULL, NULL);
     }
     for (hot = 0; hot < COLS * ROWS && colors[hot] != (*c & 0xFFFFFFL); hot++)
         ;
@@ -176,50 +218,12 @@ BOOL ColorPickerChoose(HWND button, COLORREF FAR *c)
     ShowWindow(w, SW_SHOWNA);
     UpdateWindow(w);
     SetCapture(w);
-    while (!done) {
+    do
         if (!GetMessage(&msg, NULL, 0, 0)) {
             PostQuitMessage(msg.wParam);
             break;
         }
-        switch (msg.message) {
-        case WM_LBUTTONDOWN:
-        case WM_RBUTTONDOWN:            /* outside: cancel */
-            GetWindowRect(w, &r);
-            if (!PtInRect(&r, msg.pt))
-                done = TRUE;
-            break;
-        case WM_LBUTTONUP:
-            ScreenToClient(w, &msg.pt);
-            if ((i = CellAt(msg.pt.x, msg.pt.y)) >= 0) {
-                chosen = i;
-                done = TRUE;
-            }
-            break;
-        case WM_MOUSEMOVE:
-            ScreenToClient(w, &msg.pt);
-            if ((i = CellAt(msg.pt.x, msg.pt.y)) >= 0 && i != hot) {
-                hot = i;
-                InvalidateRect(w, NULL, FALSE);
-            }
-            break;
-        case WM_KEYDOWN:
-            switch (msg.wParam) {
-            case VK_ESCAPE: done = TRUE; break;
-            case VK_RETURN: chosen = hot; done = TRUE; break;
-            case VK_LEFT:   hot = max(0, hot - 1); break;
-            case VK_RIGHT:  hot = min(COLS * ROWS, hot + 1); break;
-            case VK_UP:     hot = hot == COLS * ROWS ? COLS * (ROWS - 1) : max(0, hot - COLS); break;
-            case VK_DOWN:   hot = min(COLS * ROWS, hot + COLS); break;
-            }
-            InvalidateRect(w, NULL, FALSE);
-            break;
-        default:
-            if (msg.message < WM_KEYFIRST || msg.message > WM_MOUSELAST)
-                DispatchMessage(&msg);  /* paint and timers; input stays with the palette */
-        }
-        if (GetCapture() != w)
-            done = TRUE;
-    }
+    while (PaletteMessage(w, &msg, &chosen) && GetCapture() == w);
     ReleaseCapture();
     DestroyWindow(w);
     if (chosen == COLS * ROWS)

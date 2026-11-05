@@ -1,7 +1,9 @@
 /*
  * The Start menu: native popup menus with owner-drawn items. Root items are
  * large with the banner on their left; folders become submenus that are
- * filled when they first open. Everything for one opening lives in one
+ * filled when they first open. Or two columns (Taskbar Properties,
+ * startmenucolumns.c): pinned and most used programs (frequent.c) and All
+ * Programs, the shell's places and commands on the right. Everything for one opening lives in one
  * arena, reset the next time the menu opens. Items of the Start Menu
  * folder have their own menu on a right click, and are dragged to another
  * place or submenu. Windows 3.1's menus know neither: a message filter
@@ -9,66 +11,26 @@
  * then opens the Start menu again where it was.
  */
 #include "internal.h"
+#include "startmenuint.h"
 
 #define ROOT_H      36
 #define SEP_H       8
-#define BANNER_W    21
 #define ARENA_SIZE  32000
-#define MAX_ENTRIES 500
 #define CMD_BASE    0x1000
-#define MAX_DEPTH   8                   /* submenus to an item, the root's included */
-#define DRAG_MIN    4                   /* pixels the mouse moves before a press is a drag */
-#define SMM_MARK    (WM_USER + 130)     /* the menu followed the mouse: mark the drop */
 
-enum { SPECIAL_NONE, SPECIAL_RUN, SPECIAL_SHUTDOWN, SPECIAL_FIND, SPECIAL_TASKBAR, SPECIAL_FOLDEROPTS };
-
-typedef struct {
-    LPSTR label;
-    LPSTR path;                 /* NULL for specials and separators */
-    HMENU parent, sub;
-    HICON icon;
-    int   top;                  /* root items: offset of their banner slice */
-    int   place;                /* StartMenuOrderPlace: 0, or where it was dragged */
-    RECT  rc;                   /* where it was painted, on the screen */
-    WORD  painted;              /* when: the latest painted at a point is shown there */
-    BYTE  pos, root, separator, filled, special, disabled;
-    BYTE  mnemonic;             /* label has an &-prefixed access key */
-    BYTE  empty;                /* "(Empty)": its folder has nothing */
-    BYTE  column;               /* starts a new column of its menu */
-} ENTRY;
-
-enum { TRACK_CLOSED, TRACK_ITEM, TRACK_DROP };
-
-typedef struct {                /* what an opening ended with */
-    int      what;              /* TRACK_* */
-    char     path[MAX_PATH];    /* the item right-clicked or dropped */
-    char     dir[MAX_PATH];     /* dropped into this folder */
-    PATHLIST order;             /* ... whose items are now in this order */
-    BYTE     pos[MAX_DEPTH];    /* the menu opens again there */
-    int      depth;
-} OUTCOME;
 
 static HGLOBAL arena;
 static BYTE far *heap;
 static WORD used;
-static ENTRY far *entries[MAX_ENTRIES];
-static int nEntries;
+ENTRY far *StartMenuEntries[MAX_ENTRIES];
+int StartMenuCount;
 static HDC bannerDC;
 static HBITMAP bannerBmp, bannerOld;
-static HWND owner;
-static BOOL smallRoot;                   /* Taskbar Properties: small icons in the Start menu */
-static HHOOK filter;                    /* set while the menu is open */
-static HTASK menuTask;                  /* the filter sees every program's menus: ours only */
-static RECT startButton;                /* (screen) pressed while the menu is up: it closes */
-static ENTRY far *clicked;              /* right-clicked: its menu comes next */
-static ENTRY far *dragged;              /* moved with the button down */
-static BOOL dragging, dropped;
-static POINT pressedAt;
-static ENTRY far *dropOn;               /* the mark is by this item, */
-static BOOL dropAfter;                  /* below it, else above */
-static HWND markWnd;                    /* in this menu window */
-static WORD paints;                     /* items painted in this opening */
-static OUTCOME out;
+HWND StartMenuOwner;
+static BOOL smallRoot;                   /* Taskbar Properties: small icons in the Start menu, */
+static BOOL twoColumns;                  /* ... or two columns */
+WORD StartMenuPaints;
+OUTCOME StartMenuOut;
 
 static void far *Alloc(WORD n)
 {
@@ -89,52 +51,55 @@ static LPSTR Str(LPCSTR s)
     return p;
 }
 
-static ENTRY far *Add(HMENU m, LPCSTR label, LPCSTR path, BOOL root)
+ENTRY far *StartMenuAdd(HMENU m, LPCSTR label, LPCSTR path, BOOL root)
 {
     ENTRY far *e;
 
-    if (nEntries == MAX_ENTRIES || (e = Alloc(sizeof(ENTRY))) == NULL)
+    if (StartMenuCount == MAX_ENTRIES || (e = Alloc(sizeof(ENTRY))) == NULL)
         return NULL;
     _fmemset(e, 0, sizeof *e);
     e->label = Str(label);
     e->path = path ? Str(path) : NULL;
     e->parent = m;
     e->root = (BYTE)root;
-    entries[nEntries++] = e;
+    StartMenuEntries[StartMenuCount++] = e;
     return e;
 }
 
-static int ItemHeight(ENTRY far *e);
 
 /* How far down its column a submenu has got before e. */
 static int ColumnHeight(ENTRY far *e)
 {
     int y = 0, i;
 
-    for (i = 0; i < nEntries && entries[i] != e; i++)
-        if (entries[i]->parent == e->parent)
-            y = (entries[i]->column ? 0 : y) + ItemHeight(entries[i]);
+    for (i = 0; i < StartMenuCount && StartMenuEntries[i] != e; i++)
+        if (StartMenuEntries[i]->parent == e->parent)
+            y = (StartMenuEntries[i]->column ? 0 : y) + StartMenuItemHeight(StartMenuEntries[i]);
     return y;
 }
 
-static void Append(ENTRY far *e)
+void StartMenuAppend(ENTRY far *e)
 {
     UINT flags = MF_OWNERDRAW;
     UINT id = CMD_BASE;
     int i, y;
     RECT work;
 
-    for (i = 0; i < nEntries && entries[i] != e; i++)
+    for (i = 0; i < StartMenuCount && StartMenuEntries[i] != e; i++)
         ;
     id += i;
     /* a submenu taller than the screen (less the taskbar) goes on in
        another column, as Windows 95's do (Windows 3.1's run off the screen) */
     y = ColumnHeight(e);
     TaskbarWorkArea(&work);
-    if (!e->root && y && y + ItemHeight(e) > work.bottom - work.top - 8) {
+    if (!e->root && y && y + StartMenuItemHeight(e) > work.bottom - work.top - 8) {
         e->column = 1;
         flags |= MF_MENUBREAK;
     }
+    if (e->bar)
+        flags |= MF_MENUBARBREAK;
+    else if (e->column)
+        flags |= MF_MENUBREAK;
     if (e->sub) {
         flags |= MF_POPUP;
         id = (UINT)e->sub;
@@ -147,10 +112,10 @@ static void Append(ENTRY far *e)
 
 static void Separator(HMENU m, BOOL root)
 {
-    ENTRY far *e = Add(m, "", NULL, root);
+    ENTRY far *e = StartMenuAdd(m, "", NULL, root);
     if (e) {
         e->separator = 1;
-        Append(e);
+        StartMenuAppend(e);
     }
 }
 
@@ -171,32 +136,32 @@ static int CompareEntries(const void far *pa, const void far *pb)
 static int AddFolder(HMENU m, LPCSTR dir, BOOL root, LPCSTR skip)
 {
     char spec[MAX_PATH], path[MAX_PATH], name[MAX_PATH];
-    static DOSENTRY f;
+    DOSENTRY f;
     DOSFIND find;
-    int first = nEntries, i;
+    int first = StartMenuCount, i;
 
     lstrcpy(spec, dir);
     PathAppend(spec, "*.*");
     if (DosFindFirst(spec, &find, &f)) {
         do {
             ENTRY far *e;
-            if ((f.attr & 0x06) || (skip && !lstrcmpi(f.name, skip)))
+            if ((f.attr & (FA_HIDDEN | FA_SYSTEM)) || (skip && !lstrcmpi(f.name, skip)))
                 continue;
             lstrcpy(path, dir);
             PathAppend(path, f.name);
             DisplayNameOfFile(f.name, name);
-            if ((e = Add(m, name, path, root)) == NULL)
+            if ((e = StartMenuAdd(m, name, path, root)) == NULL)
                 break;
             e->place = StartMenuOrderPlace(path);
-            if (f.attr & 0x10)
+            if (f.attr & FA_DIR)
                 e->sub = CreatePopupMenu();
         } while (DosFindNext(&find, &f));
         DosFindClose(&find);
     }
-    SortRecords(entries + first, nEntries - first, sizeof(ENTRY far *), CompareEntries);
-    for (i = first; i < nEntries; i++)
-        Append(entries[i]);
-    return nEntries - first;
+    SortRecords(StartMenuEntries + first, StartMenuCount - first, sizeof(ENTRY far *), CompareEntries);
+    for (i = first; i < StartMenuCount; i++)
+        StartMenuAppend(StartMenuEntries[i]);
+    return StartMenuCount - first;
 }
 
 static void FillSubmenu(ENTRY far *e)
@@ -206,16 +171,16 @@ static void FillSubmenu(ENTRY far *e)
 
     e->filled = 1;
     if (e->root && !lstrcmpi(e->path, RecentFolder(recent)) &&     /* Documents: My Documents first */
-        (docs = Add(e->sub, "My Documents", DesktopMyDocuments(), FALSE)) != NULL) {
+        (docs = StartMenuAdd(e->sub, "My Documents", DesktopMyDocuments(), FALSE)) != NULL) {
         docs->icon = IconStock(IDI_MYDOCS);
-        Append(docs);
+        StartMenuAppend(docs);
         Separator(e->sub, FALSE);
     }
     if (AddFolder(e->sub, e->path, FALSE, NULL) == 0) {
-        ENTRY far *empty = Add(e->sub, "(Empty)", NULL, FALSE);
+        ENTRY far *empty = StartMenuAdd(e->sub, "(Empty)", NULL, FALSE);
         if (empty) {
             empty->disabled = empty->empty = 1;
-            Append(empty);
+            StartMenuAppend(empty);
         }
     }
 }
@@ -230,21 +195,21 @@ static BOOL WindowsHas(LPCSTR file)
     return DosGetAttributes(path) != 0xFFFF;
 }
 
-static ENTRY far *Program(HMENU m, LPCSTR label, LPCSTR exe)
+ENTRY far *StartMenuProgram(HMENU m, LPCSTR label, LPCSTR exe)
 {
     char path[MAX_PATH];
     ENTRY far *e;
 
     GetWindowsDirectory(path, sizeof path);
     PathAppend(path, exe);
-    if ((e = Add(m, label, path, FALSE)) != NULL)
+    if ((e = StartMenuAdd(m, label, path, FALSE)) != NULL)
         e->mnemonic = 1;
     return e;
 }
 
-static ENTRY far *RootItem(HMENU m, LPCSTR label, LPCSTR path, int icon)
+ENTRY far *StartMenuRootItem(HMENU m, LPCSTR label, LPCSTR path, int icon)
 {
-    ENTRY far *e = Add(m, label, path, TRUE);
+    ENTRY far *e = StartMenuAdd(m, label, path, TRUE);
     if (e) {
         e->icon = IconStock(icon);
         e->mnemonic = 1;
@@ -252,9 +217,54 @@ static ENTRY far *RootItem(HMENU m, LPCSTR label, LPCSTR path, int icon)
     return e;
 }
 
+/* An item that opens one of the shell's own dialogs. */
+static void Special(HMENU m, LPCSTR label, int icon, int special)
+{
+    ENTRY far *e = StartMenuAdd(m, label, NULL, FALSE);
+
+    if (e) {
+        e->icon = IconStock(icon);
+        e->mnemonic = 1;
+        e->special = (BYTE)special;
+        StartMenuAppend(e);
+    }
+}
+
+/* Settings and Find, with their items. */
+ENTRY far *StartMenuSettingsItem(HMENU root)
+{
+    ENTRY far *e = StartMenuRootItem(root, "&Settings", NULL, IDI_SM_SETTINGS), far *i;
+    HMENU m;
+
+    if (!e)
+        return NULL;
+    e->sub = m = CreatePopupMenu();
+    e->filled = 1;
+    if ((i = StartMenuProgram(m, "&Control Panel", "CONTROL.EXE")) != NULL) StartMenuAppend(i);
+    if ((i = StartMenuProgram(m, "&Printers", "PRINTMAN.EXE")) != NULL) StartMenuAppend(i);
+    /* WINSETUP.EXE: Setup inside Windows (SETUP.EXE is the DOS one: no use with Windows running) */
+    if (WindowsHas("WINSETUP.EXE") && (i = StartMenuProgram(m, "Windows &Setup", "WINSETUP.EXE")) != NULL) StartMenuAppend(i);
+    Special(m, "&Taskbar && Start Menu...", IDI_SNOWBALL, SPECIAL_TASKBAR);
+    Special(m, "&Folder Options...", IDI_FOLDER, SPECIAL_FOLDEROPTS);
+    Special(m, "T&heme Manager...", IDI_DISPLAY, SPECIAL_THEMES);
+    return e;
+}
+
+ENTRY far *StartMenuFindItem(HMENU root)
+{
+    ENTRY far *e = StartMenuRootItem(root, "&Find", NULL, IDI_SM_FIND);
+
+    if (e) {
+        e->sub = CreatePopupMenu();
+        e->filled = 1;
+        Special(e->sub, "&Files or Folders...", IDI_SM_FIND, SPECIAL_FIND);
+    }
+    return e;
+}
+
 static HMENU BuildRoot(void)
 {
-    HMENU root = CreatePopupMenu(), settings, find;
+    HMENU root = CreatePopupMenu();
     char dir[MAX_PATH], programs[MAX_PATH];
     ENTRY far *e;
 
@@ -264,101 +274,102 @@ static HMENU BuildRoot(void)
 
     lstrcpy(programs, dir);
     PathAppend(programs, "Programs");
-    if ((e = RootItem(root, "&Programs", programs, IDI_SM_PROGRAMS)) != NULL) {
+    if ((e = StartMenuRootItem(root, "&Programs", programs, IDI_SM_PROGRAMS)) != NULL) {
         e->sub = CreatePopupMenu();
-        Append(e);
+        StartMenuAppend(e);
     }
-    if ((e = RootItem(root, "&Documents", RecentFolder(dir), IDI_SM_DOCS)) != NULL) {
+    if ((e = StartMenuRootItem(root, "&Documents", RecentFolder(dir), IDI_SM_DOCS)) != NULL) {
         e->sub = CreatePopupMenu();     /* filled when it opens: "(Empty)" if nothing */
-        Append(e);
+        StartMenuAppend(e);
     }
-    StartMenuFolder(dir);
-    if ((e = RootItem(root, "&Settings", NULL, IDI_SM_SETTINGS)) != NULL) {
-        e->sub = settings = CreatePopupMenu();
-        e->filled = 1;
-        Append(e);
-        if ((e = Program(settings, "&Control Panel", "CONTROL.EXE")) != NULL) Append(e);
-        if ((e = Program(settings, "&Printers", "PRINTMAN.EXE")) != NULL) Append(e);
-        /* WINSETUP.EXE: Setup inside Windows (SETUP.EXE is the DOS one: no use with Windows running) */
-        if (WindowsHas("WINSETUP.EXE") && (e = Program(settings, "Windows &Setup", "WINSETUP.EXE")) != NULL) Append(e);
-        if ((e = Add(settings, "&Taskbar && Start Menu...", NULL, FALSE)) != NULL) {
-            e->icon = IconStock(IDI_SNOWBALL);
-            e->mnemonic = 1;
-            e->special = SPECIAL_TASKBAR;
-            Append(e);
-        }
-        if ((e = Add(settings, "&Folder Options...", NULL, FALSE)) != NULL) {
-            e->icon = IconStock(IDI_FOLDER);
-            e->mnemonic = 1;
-            e->special = SPECIAL_FOLDEROPTS;
-            Append(e);
-        }
-    }
-    if ((e = RootItem(root, "&Find", NULL, IDI_SM_FIND)) != NULL) {
-        e->sub = find = CreatePopupMenu();
-        e->filled = 1;
-        Append(e);
-        if ((e = Add(find, "&Files or Folders...", NULL, FALSE)) != NULL) {
-            e->icon = IconStock(IDI_SM_FIND);
-            e->mnemonic = 1;
-            e->special = SPECIAL_FIND;
-            Append(e);
-        }
-    }
-    if ((e = RootItem(root, "&Run...", NULL, IDI_SM_RUN)) != NULL) {
+    if ((e = StartMenuSettingsItem(root)) != NULL)
+        StartMenuAppend(e);
+    if ((e = StartMenuFindItem(root)) != NULL)
+        StartMenuAppend(e);
+    if ((e = StartMenuRootItem(root, "&Run...", NULL, IDI_SM_RUN)) != NULL) {
         e->special = SPECIAL_RUN;
-        Append(e);
+        StartMenuAppend(e);
     }
     Separator(root, TRUE);
-    if ((e = RootItem(root, "Sh&ut Down...", NULL, IDI_SM_SHUTDOWN)) != NULL) {
+    if ((e = StartMenuRootItem(root, "Sh&ut Down...", NULL, IDI_SM_SHUTDOWN)) != NULL) {
         e->special = SPECIAL_SHUTDOWN;
-        Append(e);
+        StartMenuAppend(e);
     }
     return root;
 }
 
 /* Root items are large, with the banner, unless Taskbar Properties says
-   small icons. */
-static BOOL Big(ENTRY far *e)
+   small icons; with two columns the pinned and most used, no banner. */
+BOOL StartMenuBig(ENTRY far *e)
 {
-    return e->root && !smallRoot;
+    return !smallRoot && (twoColumns ? e->fixed : e->root);
 }
 
-static int ItemHeight(ENTRY far *e)
+BOOL StartMenuBannered(ENTRY far *e)
 {
-    return e->separator ? SEP_H : Big(e) ? ROOT_H : MENUITEM_H;
+    return !twoColumns && StartMenuBig(e);
 }
 
-static COLORREF IniColor(LPCSTR key, LPCSTR def)
+int StartMenuItemHeight(ENTRY far *e)
+{
+    return e->spacer || e->band ? e->height : e->separator ? SEP_H : StartMenuBig(e) ? ROOT_H : MENUITEM_H;
+}
+
+/* [Start] key ("1084D0"), else def: the scheme's. */
+static COLORREF IniColor(LPCSTR key, COLORREF def)
 {
     char hex[8];
     DWORD v = 0;
     LPSTR p;
 
-    SettingsGetString("Start", key, def, hex, sizeof hex);
+    SettingsGetString("Start", key, "", hex, sizeof hex);
+    if (!*hex)
+        return def;
     for (p = hex; *p; p++)
         v = v * 16 + (*p <= '9' ? *p - '0' : ((*p | 0x20) - 'a' + 10));
     return RGB((BYTE)(v >> 16), (BYTE)(v >> 8), (BYTE)v);
 }
 
-/* The banner: a vertical gradient with the text running upwards,
-   first word bold ("Windows 3.11"). */
-static void MakeBanner(int height)
+static int Lightness(COLORREF c)        /* 0 to 255 */
 {
-    HDC screen = GetDC(NULL);
+    return (GetRValue(c) * 30 + GetGValue(c) * 59 + GetBValue(c) * 11) / 100;
+}
+
+/* The banner's gradient, top to bottom, and its text's colour: the active
+   title bar's. Light text: the title's colour half as light at the top,
+   Color 2 at the bottom (as Windows 98's), or the title's colour if the
+   text would not show on Color 2 (with 256 colours or fewer, the title's
+   alone). Dark text: the title's colours as they are. */
+void StartMenuBannerColors(COLORREF *top, COLORREF *bottom, COLORREF *text)
+{
+    COLORREF c = GetSysColor(COLOR_ACTIVECAPTION), c2 = SkinColor(SC_GRADIENT_ACTIVE);
+    int light;
+
+    *text = GetSysColor(COLOR_CAPTIONTEXT);
+    light = Lightness(*text);
+    if (light >= 128 && DrawScreenDepth() <= 8) {   /* one colour (no gradients): the title's */
+        *top = *bottom = c;
+    } else if (light >= 128) {
+        *top = RGB(GetRValue(c) / 2, GetGValue(c) / 2, GetBValue(c) / 2);
+        *bottom = light - Lightness(c2) >= 112 ? c2 : c;
+    } else {
+        *top = c;
+        *bottom = c2;
+    }
+    *top = IniColor("BannerTop", *top);
+    *bottom = IniColor("BannerBottom", *bottom);
+}
+
+/* The banner's text from x, y, running upwards (up) or along: the first
+   word bold ("Windows 3.11"), the rest a little fainter, in the title's ink. */
+void StartMenuBannerText(HDC dc, int x, int y, BOOL up)
+{
     char text[40];
     LPSTR rest;
     LOGFONT lf;
     HFONT bold, light, old;
-    RECT r;
-    int y;
-
-    bannerDC = CreateCompatibleDC(screen);
-    bannerBmp = CreateCompatibleBitmap(screen, BANNER_W, height);
-    ReleaseDC(NULL, screen);
-    bannerOld = SelectObject(bannerDC, bannerBmp);
-    SetRect(&r, 0, 0, BANNER_W, height);
-    DrawGradient(bannerDC, &r, IniColor("BannerTop", "000040"), IniColor("BannerBottom", "1084D0"), TRUE);
+    COLORREF ink = GetSysColor(COLOR_CAPTIONTEXT);
+    int w;
 
     SettingsGetString("Start", "Banner", "Windows 3.11", text, sizeof text);
     for (rest = text; *rest && *rest != ' '; rest++)
@@ -367,7 +378,7 @@ static void MakeBanner(int height)
         *rest++ = '\0';
     _fmemset(&lf, 0, sizeof lf);
     lf.lfHeight = -17;
-    lf.lfEscapement = lf.lfOrientation = 900;
+    lf.lfEscapement = lf.lfOrientation = up ? 900 : 0;
     lf.lfWeight = FW_BOLD;
     lf.lfOutPrecision = OUT_TT_PRECIS;
     lstrcpy(lf.lfFaceName, "Arial");
@@ -375,30 +386,35 @@ static void MakeBanner(int height)
     lf.lfWeight = FW_NORMAL;
     light = CreateFontIndirect(&lf);
 
-    SetBkMode(bannerDC, TRANSPARENT);
-    SetTextColor(bannerDC, RGB(255, 255, 255));
-    old = SelectObject(bannerDC, bold);
-    y = height - 6;
-    TextOut(bannerDC, 1, y, text, lstrlen(text));
-    y -= LOWORD(GetTextExtent(bannerDC, text, lstrlen(text))) + 5;
-    SelectObject(bannerDC, light);
-    SetTextColor(bannerDC, RGB(224, 224, 224));
-    TextOut(bannerDC, 1, y, rest, lstrlen(rest));
-    SelectObject(bannerDC, old);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, ink);
+    old = SelectObject(dc, bold);
+    TextOut(dc, x, y, text, lstrlen(text));
+    w = LOWORD(GetTextExtent(dc, text, lstrlen(text))) + 5;
+    SelectObject(dc, light);
+    SetTextColor(dc, RGB(GetRValue(ink) + (128 - GetRValue(ink)) / 4, GetGValue(ink) + (128 - GetGValue(ink)) / 4,
+                         GetBValue(ink) + (128 - GetBValue(ink)) / 4));       /* white: 224 */
+    TextOut(dc, up ? x : x + w, up ? y - w : y, rest, lstrlen(rest));
+    SelectObject(dc, old);
     DeleteObject(bold);
     DeleteObject(light);
 }
 
-/* A drop mark: a black line along the top or the bottom of e, on the screen. */
-static void MarkRect(ENTRY far *e, BOOL after, RECT *r)
+/* The banner: a vertical gradient with the text running upwards. */
+static void MakeBanner(int height)
 {
-    *r = e->rc;
-    if (Big(e))
-        r->left += BANNER_W;
-    if (after)
-        r->top = r->bottom - 2;
-    else
-        r->bottom = r->top + 2;
+    HDC screen = GetDC(NULL);
+    COLORREF top, bottom, ink;
+    RECT r;
+
+    bannerDC = CreateCompatibleDC(screen);
+    bannerBmp = CreateCompatibleBitmap(screen, BANNER_W, height);
+    ReleaseDC(NULL, screen);
+    bannerOld = SelectObject(bannerDC, bannerBmp);
+    SetRect(&r, 0, 0, BANNER_W, height);
+    StartMenuBannerColors(&top, &bottom, &ink);
+    DrawGradient(bannerDC, &r, top, bottom, TRUE);
+    StartMenuBannerText(bannerDC, 1, height - 6, TRUE);
 }
 
 /* Each item off the screen, then onto it at once. */
@@ -412,14 +428,24 @@ static void DrawEntry(const DRAWITEMSTRUCT FAR *d)
 
     e->rc = r;
     OffsetRect(&e->rc, LOWORD(org), HIWORD(org));
-    e->painted = ++paints;
-    if (Big(e)) {
+    e->painted = ++StartMenuPaints;
+    if (StartMenuBannered(e)) {
         BitBlt(dc, r.left, r.top, BANNER_W, r.bottom - r.top, bannerDC, 0, e->top, SRCCOPY);
         r.left += BANNER_W;
     }
-    if (e->separator) {
-        DrawSolidRect(dc, &r, GetSysColor(COLOR_MENU));
-        SetRect(&t, r.left + 2, r.top + SEP_H / 2 - 1, r.right - 2, r.top + SEP_H / 2);
+    if (e->band) {
+        StartMenuColumnsBand(dc, e, &r, (d->itemState & ODS_SELECTED) && !e->disabled);
+        DrawOffscreenEnd(&o);
+        StartMenuColumnsGap(d->hDC, e, &d->rcItem);
+        return;
+    }
+    if (e->separator || e->spacer) {
+        DrawSolidRect(dc, &r, GetSysColor(e->pane ? COLOR_WINDOW : COLOR_MENU));
+        if (e->spacer) {
+            DrawOffscreenEnd(&o);
+            return;
+        }
+        SetRect(&t, r.left + (e->pane ? 8 : 2), r.top + SEP_H / 2 - 1, r.right - (e->pane ? 8 : 2), r.top + SEP_H / 2);
         DrawSolidRect(dc, &t, GetSysColor(COLOR_BTNSHADOW));
         OffsetRect(&t, 0, 1);
         DrawSolidRect(dc, &t, GetSysColor(COLOR_BTNHIGHLIGHT));
@@ -428,394 +454,24 @@ static void DrawEntry(const DRAWITEMSTRUCT FAR *d)
     }
     if (!e->icon && e->path)
         e->icon = e->sub ? IconStock(IDI_FOLDER) : IconForFile(e->path, FALSE);
-    MenuItemPaint(dc, &r, e->icon, Big(e), e->label, (d->itemState & ODS_SELECTED ? MIP_SELECTED : 0) |
-                  (e->disabled ? MIP_DISABLED : 0) | (e->mnemonic ? MIP_MNEMONIC : 0));
+    MenuItemPaint(dc, &r, e->icon, e->label, (d->itemState & ODS_SELECTED ? MIP_SELECTED : 0) |
+                  (e->disabled ? MIP_DISABLED : 0) | (e->mnemonic ? MIP_MNEMONIC : 0) | (StartMenuBig(e) ? MIP_LARGE : 0) |
+                  (e->pane ? MIP_PANE : 0) | (e->bold ? MIP_BOLD : 0) | (e->center ? MIP_CENTER : 0));
     DrawOffscreenEnd(&o);
-    if (e == dropOn) {                  /* (the mark goes over the item's edge: on the menu itself) */
-        MarkRect(e, dropAfter, &t);
-        OffsetRect(&t, -(int)LOWORD(org), -(int)HIWORD(org));
-        DrawSolidRect(d->hDC, &t, RGB(0, 0, 0));
-    }
+    StartMenuDragPaintMark(d->hDC, e, org);
 }
 
 static void MeasureEntry(MEASUREITEMSTRUCT FAR *m)
 {
     ENTRY far *e = (ENTRY far *)m->itemData;
-    int w = MenuItemWidth(e->label, e->mnemonic, Big(e));
+    int w = MenuItemWidth(e->label, (e->mnemonic ? MIP_MNEMONIC : 0) | (StartMenuBig(e) ? MIP_LARGE : 0) |
+                          (e->bold ? MIP_BOLD : 0));
 
-    m->itemHeight = ItemHeight(e);
-    m->itemWidth = Big(e) ? max(BANNER_W + w, 150) : w;
-}
-
-static BOOL InStartMenu(LPCSTR path)
-{
-    char dir[MAX_PATH];
-
-    StartMenuFolder(dir);
-    return path && PathIsInside(path, dir);
-}
-
-/* An item of the Start Menu folder: it has a menu of its own, it moves. */
-static BOOL Editable(ENTRY far *e)
-{
-    return e && !e->mnemonic && InStartMenu(e->path);
-}
-
-/* The folder an item dropped by e lands in: e's, or the one "(Empty)" is in. */
-static BOOL DropFolder(ENTRY far *e, LPSTR dir)
-{
-    int i;
-
-    if (e && e->empty) {
-        for (i = 0; i < nEntries && entries[i]->sub != e->parent; i++)
-            ;
-        if (i == nEntries || !InStartMenu(entries[i]->path))
-            return FALSE;
-        lstrcpy(dir, entries[i]->path);
-        return TRUE;
-    }
-    if (!Editable(e))
-        return FALSE;
-    lstrcpy(dir, e->path);
-    PathToParent(dir);
-    return TRUE;
-}
-
-static BOOL CanDrop(ENTRY far *e)
-{
-    char dir[MAX_PATH];
-
-    return dragged && e != dragged && DropFolder(e, dir) && !PathIsInside(dir, dragged->path);
-}
-
-/* The item under a point of the screen: in a menu shown there, the one
-   painted last (closed menus leave their items behind). */
-static ENTRY far *ItemAt(POINT p)
-{
-    ENTRY far *found = NULL;
-    HWND under = WindowFromPoint(p);
-    char cls[8];
-    int i;
-
-    if (!under)                         /* (no window there) */
-        return NULL;
-    GetClassName(under, cls, sizeof cls);
-    if (lstrcmp(cls, "#32768"))
-        return NULL;
-    for (i = 0; i < nEntries; i++)
-        if (entries[i]->painted > (found ? found->painted : 0) && PtInRect(&entries[i]->rc, p))
-            found = entries[i];
-    return found;
-}
-
-static void RepaintMark(HWND w, ENTRY far *e, BOOL after)
-{
-    RECT r;
-
-    MarkRect(e, after, &r);
-    ScreenToClient(w, (POINT FAR *)&r.left);
-    ScreenToClient(w, (POINT FAR *)&r.right);
-    InvalidateRect(w, &r, FALSE);
-    UpdateWindow(w);
-}
-
-/* Moves the mark to e (NULL: none) by repainting the item it leaves and
-   the one it goes to. */
-static void MarkAt(HWND w, ENTRY far *e, BOOL after)
-{
-    ENTRY far *was = dropOn;
-    BOOL wasAfter = dropAfter;
-    HWND wasIn = markWnd;
-
-    dropOn = e;
-    dropAfter = after;
-    markWnd = w;
-    if (was)
-        RepaintMark(wasIn, was, wasAfter);
-    if (e)
-        RepaintMark(w, e, after);
-}
-
-/* The mark where the dragged item would go, above or below the item under
-   the cursor, and the cursor saying whether it can go there. */
-static void Mark(void)
-{
-    static HCURSOR move, none;
-    ENTRY far *e;
-    POINT p;
-    BOOL after;
-
-    GetCursorPos(&p);
-    e = ItemAt(p);
-    if (!CanDrop(e))
-        e = NULL;
-    after = e && !e->empty && p.y >= (e->rc.top + e->rc.bottom) / 2;
-    if (e != dropOn || after != dropAfter)
-        MarkAt(WindowFromPoint(p), e, after);
-    if (!move) {
-        move = LoadCursor(g_hArt, MAKEINTRESOURCE(IDR_DRAGMOVE));
-        none = LoadCursor(g_hArt, MAKEINTRESOURCE(IDR_NODROP));
-    }
-    SetCursor(e ? move : none);
-}
-
-static int Distance(int a, int b)
-{
-    return a > b ? a - b : b - a;
-}
-
-/* ---- ghosts: Windows 3.1 shows one menu at a time, so the Start menu ends
-   for an item's own menu and opens again after it. Meanwhile pictures of
-   its open menus stay where they were, under the item's menu, until the
-   menu has opened again as far. ---- */
-#define MAX_GHOSTS  (MAX_DEPTH + 1)
-static HWND ghosts[MAX_GHOSTS];
-static int nGhosts;
-static BOOL ghostsGo;                   /* the menu has opened again: they may go */
-
-LRESULT CALLBACK __export StartMenuGhostProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
-{
-    PAINTSTRUCT ps;
-    HDC mem;
-    HBITMAP old;
-    RECT r;
-
-    switch (msg) {
-    case WM_PAINT:
-        BeginPaint(w, &ps);
-        GetClientRect(w, &r);
-        mem = CreateCompatibleDC(ps.hdc);
-        old = SelectObject(mem, (HBITMAP)GetWindowWord(w, 0));
-        BitBlt(ps.hdc, 0, 0, r.right, r.bottom, mem, 0, 0, SRCCOPY);
-        SelectObject(mem, old);
-        DeleteDC(mem);
-        EndPaint(w, &ps);
-        return 0;
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
-    case WM_DESTROY:
-        DeleteObject((HBITMAP)GetWindowWord(w, 0));
-        return 0;
-    }
-    return DefWindowProc(w, msg, wp, lp);
-}
-
-/* The visible menus (their windows), at most max of them into list. */
-static int OpenMenus(HWND *list, int max)
-{
-    char cls[8];
-    HWND m;
-    int n = 0;
-
-    for (m = GetWindow(GetDesktopWindow(), GW_CHILD); m && n < max; m = GetWindow(m, GW_HWNDNEXT)) {
-        GetClassName(m, cls, sizeof cls);
-        if (IsWindowVisible(m) && !lstrcmp(cls, "#32768")) {
-            if (list)
-                list[n] = m;
-            n++;
-        }
-    }
-    return n;
-}
-
-static void GhostsMake(void)
-{
-    static BOOL registered;
-    HWND open[MAX_GHOSTS], g;
-    HDC screen, mem;
-    HBITMAP bmp, old;
-    RECT r;
-    int i, n;
-
-    if (!registered) {
-        WNDCLASS wc;
-        _fmemset(&wc, 0, sizeof wc);
-        wc.lpfnWndProc = StartMenuGhostProc;
-        wc.cbWndExtra = sizeof(WORD);   /* its picture */
-        wc.hInstance = g_hInst;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = "SbMenuGhost";
-        registered = RegisterClass(&wc);
-    }
-    n = OpenMenus(open, MAX_GHOSTS);
-    screen = GetDC(NULL);
-    mem = CreateCompatibleDC(screen);
-    for (i = 0; i < n && nGhosts < MAX_GHOSTS; i++) {
-        GetWindowRect(open[i], &r);
-        if ((bmp = CreateCompatibleBitmap(screen, r.right - r.left, r.bottom - r.top)) == NULL)
-            continue;
-        old = SelectObject(mem, bmp);
-        BitBlt(mem, 0, 0, r.right - r.left, r.bottom - r.top, screen, r.left, r.top, SRCCOPY);
-        SelectObject(mem, old);
-        g = CreateWindowEx(0, "SbMenuGhost", "", WS_POPUP, r.left, r.top, r.right - r.left,
-                           r.bottom - r.top, NULL, NULL, g_hInst, NULL);
-        if (!g) {
-            DeleteObject(bmp);
-            continue;
-        }
-        SetWindowWord(g, 0, (WORD)bmp);
-        ShowWindow(g, SW_SHOWNOACTIVATE);
-        UpdateWindow(g);
-        ghosts[nGhosts++] = g;
-    }
-    DeleteDC(mem);
-    ReleaseDC(NULL, screen);
-}
-
-static void GhostsGone(void)
-{
-    while (nGhosts)
-        DestroyWindow(ghosts[--nGhosts]);
-}
-
-/* The menu loop's messages. The right button is taken from the menu: let go
-   over an item of the Start Menu folder, it ends the menu for the item's
-   own. The left button pressed on one and moved drags it; let go by the
-   mark, it ends the menu for the move. */
-LRESULT CALLBACK __export StartMenuFilterProc(int code, WPARAM wp, LPARAM lp)
-{
-    MSG FAR *m = (MSG FAR *)lp;
-    ENTRY far *e;
-    POINT p;
-
-    if (code != MSGF_MENU || GetCurrentTask() != menuTask)
-        return CallNextHookEx(filter, code, wp, lp);
-    /* opened again as far as before (or the user goes on): no more pictures */
-    if (nGhosts && ghostsGo && (OpenMenus(NULL, MAX_GHOSTS) >= nGhosts || m->message == WM_LBUTTONDOWN ||
-                    m->message == WM_RBUTTONDOWN || m->message == WM_CHAR))
-        GhostsGone();
-    GetCursorPos(&p);
-    switch (m->message) {
-    case WM_RBUTTONDOWN:
-        return TRUE;
-    case WM_RBUTTONUP:
-        if (!dragging && Editable(e = ItemAt(p))) {
-            clicked = e;
-            GhostsMake();
-            ghostsGo = FALSE;           /* (this menu is still up) */
-            PostMessage(owner, WM_CANCELMODE, 0, 0L);
-        }
-        return TRUE;
-    case WM_LBUTTONDOWN:
-        if (PtInRect(&startButton, p)) {    /* the Start button again: the menu closes */
-            PostMessage(owner, WM_CANCELMODE, 0, 0L);
-            return TRUE;
-        }
-        dragging = FALSE;
-        pressedAt = p;
-        break;
-    case WM_MOUSEMOVE:
-        if (!dragging && (m->wParam & MK_LBUTTON) && Editable(e = ItemAt(pressedAt)) &&
-            (Distance(p.x, pressedAt.x) > DRAG_MIN || Distance(p.y, pressedAt.y) > DRAG_MIN)) {
-            dragged = e;
-            dragging = TRUE;
-        }
-        if (dragging)
-            PostMessage(owner, SMM_MARK, 0, 0L);
-        break;
-    case WM_LBUTTONUP:
-        if (!dragging)
-            break;
-        dragging = FALSE;
-        if (dropOn) {
-            dropped = TRUE;
-            PostMessage(owner, WM_CANCELMODE, 0, 0L);
-        } else {
-            dragged = NULL;
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
-        }
-        return TRUE;                    /* not a click on the item */
-    }
-    return CallNextHookEx(filter, code, wp, lp);
-}
-
-/* Positions of the items from the root to e, each in its menu. */
-static int Trail(ENTRY far *e, BYTE *pos)
-{
-    ENTRY far *up[MAX_DEPTH];
-    int n = 0, i;
-
-    while (e && n < MAX_DEPTH) {
-        up[n++] = e;
-        for (i = 0; i < nEntries && entries[i]->sub != e->parent; i++)
-            ;
-        e = i < nEntries ? entries[i] : NULL;
-    }
-    for (i = 0; i < n; i++)
-        pos[i] = up[n - 1 - i]->pos;
-    return n;
-}
-
-/* Keys for the menu to open the submenus to pos and select the last. A
-   menu opened with no button down starts on its first item, as does each
-   submenu opened with the right arrow. */
-static void PostTrail(const BYTE *pos, int n)
-{
-    int i, k;
-
-    for (i = 0; i < n; i++) {
-        if (i)
-            PostMessage(owner, WM_KEYDOWN, VK_RIGHT, 1L);
-        for (k = 0; k < pos[i]; k++)
-            PostMessage(owner, WM_KEYDOWN, VK_DOWN, 1L);
-    }
-}
-
-/* The dragged item's folder now, and the order of the folder's items with
-   it; the menu opens again on it. */
-static void Dropped(void)
-{
-    LPSTR name = PathFileName(dragged->path);
-    ENTRY far *e;
-    int i, at = 0;
-
-    DropFolder(dropOn, out.dir);
-    lstrcpy(out.path, dragged->path);
-    PathListInit(&out.order);
-    if (dropOn->empty)
-        PathListAdd(&out.order, name);
-    for (i = 0; i < nEntries && !dropOn->empty; i++) {
-        e = entries[i];
-        if (e->parent != dropOn->parent || e == dragged || !Editable(e))
-            continue;
-        if (e == dropOn && !dropAfter) {
-            at = out.order.count;
-            PathListAdd(&out.order, name);
-        }
-        PathListAdd(&out.order, PathFileName(e->path));
-        if (e == dropOn && dropAfter) {
-            at = out.order.count;
-            PathListAdd(&out.order, name);
-        }
-    }
-    out.depth = Trail(dropOn, out.pos);
-    out.pos[out.depth - 1] = (BYTE)at;  /* the folder's own items come first in its menu */
-    out.what = TRACK_DROP;
-}
-
-/* The dropped item into its folder, in its place. */
-static void Move(HWND w)
-{
-    char from[MAX_PATH], to[MAX_PATH];
-
-    lstrcpy(from, out.path);
-    PathToParent(from);
-    if (lstrcmpi(from, out.dir)) {
-        lstrcpy(to, out.dir);
-        PathAppend(to, PathFileName(out.path));
-        if (DosGetAttributes(to) != 0xFFFF) {
-            FileOperationError(w, "move", out.path, 80);
-            return;
-        }
-        if (!DosRename(out.path, to)) {
-            FileOperationError(w, "move", out.path, DosLastError());
-            return;
-        }
-        StartMenuOrderRename(out.path, to);
-        FileCommandsFolderChanged(from);
-        FileCommandsFolderChanged(out.dir);
-    }
-    StartMenuOrderSet(out.dir, &out.order);
+    m->itemHeight = StartMenuItemHeight(e);
+    if (twoColumns && e->root)
+        m->itemWidth = StartMenuColumnsWidth(e, w);
+    else
+        m->itemWidth = StartMenuBig(e) ? max(BANNER_W + w, 150) : w;
 }
 
 /* One opening; out says how it ended. Letting go of the mouse over the
@@ -826,94 +482,87 @@ static void Track(const RECT *button)
     HMENU root;
     int i, y = 0;
 
-    startButton = *button;
     heap = GlobalLock(arena);
     used = 0;
-    nEntries = 0;
+    StartMenuCount = 0;
     smallRoot = SettingsGetInt("Taskbar", "SmallIcons", 0);
-    root = BuildRoot();
-    for (i = 0; i < nEntries; i++)
-        if (entries[i]->parent == root) {
-            entries[i]->top = y;
-            y += ItemHeight(entries[i]);
+    twoColumns = SettingsGetInt("Taskbar", "TwoColumns", 0);
+    root = twoColumns ? StartMenuColumns() : BuildRoot();
+    for (i = 0; i < StartMenuCount; i++)        /* (two columns: the left one's, as high) */
+        if (StartMenuEntries[i]->parent == root && (!twoColumns || StartMenuEntries[i]->pane)) {
+            StartMenuEntries[i]->top = y;
+            y += StartMenuItemHeight(StartMenuEntries[i]);
         }
-    MakeBanner(y);
-    clicked = dragged = dropOn = NULL;
-    dragging = dropped = FALSE;
-    ghostsGo = TRUE;
-    paints = 0;
-    pressedAt.x = pressedAt.y = -32000;  /* no press in it yet: the Start button's drags select */
-    out.what = TRACK_CLOSED;
-    menuTask = GetCurrentTask();         /* Windows 3.1 refuses a task's own filter from a DLL */
-    filter = SetWindowsHookEx(WH_MSGFILTER, (HOOKPROC)StartMenuFilterProc, g_hInst, NULL);
-    GetWindowRect(owner, &bar);
+    if (!twoColumns)
+        MakeBanner(y);
+    StartMenuPaints = 0;
+    StartMenuDragBegin(button);
+    GetWindowRect(StartMenuOwner, &bar);
     /* the items and the menu's edges (3 pixels each side) against the
        taskbar: just above it, below it at the top of the screen, beside it
        from the Start button's top at a side (its edge grows 3 pixels right) */
     switch (TaskbarEdge()) {
-    case TBE_TOP:   TrackPopupMenu(root, TPM_LEFTALIGN | TPM_LEFTBUTTON, bar.left, bar.bottom, 0, owner, button); break;
-    case TBE_LEFT:  TrackPopupMenu(root, TPM_LEFTALIGN | TPM_LEFTBUTTON, bar.right, button->top, 0, owner, button); break;
-    case TBE_RIGHT: TrackPopupMenu(root, TPM_RIGHTALIGN | TPM_LEFTBUTTON, bar.left - 3, button->top, 0, owner, button); break;
-    default:        TrackPopupMenu(root, TPM_LEFTALIGN | TPM_LEFTBUTTON, bar.left, bar.top - y - 6, 0, owner, button);
+    case TBE_TOP:   TrackPopupMenu(root, TPM_LEFTALIGN | TPM_LEFTBUTTON, bar.left, bar.bottom, 0, StartMenuOwner, button); break;
+    case TBE_LEFT:  TrackPopupMenu(root, TPM_LEFTALIGN | TPM_LEFTBUTTON, bar.right, button->top, 0, StartMenuOwner, button); break;
+    case TBE_RIGHT: TrackPopupMenu(root, TPM_RIGHTALIGN | TPM_LEFTBUTTON, bar.left - 3, button->top, 0, StartMenuOwner, button); break;
+    default:        TrackPopupMenu(root, TPM_LEFTALIGN | TPM_LEFTBUTTON, bar.left, bar.top - y - 6, 0, StartMenuOwner, button);
     }
-    UnhookWindowsHookEx(filter);
-    filter = NULL;
-    if (clicked) {
-        out.what = TRACK_ITEM;
-        lstrcpy(out.path, clicked->path);
-        out.depth = Trail(clicked, out.pos);
-    } else if (dropped) {
-        Dropped();
-    }
+    StartMenuDragEnd();
     DestroyMenu(root);
-    SelectObject(bannerDC, bannerOld);
-    DeleteObject(bannerBmp);
-    DeleteDC(bannerDC);
-    GlobalUnlock(arena);        /* entries stay valid until the next opening */
+    if (!twoColumns) {
+        SelectObject(bannerDC, bannerOld);
+        DeleteObject(bannerBmp);
+        DeleteDC(bannerDC);
+    }
+    GlobalUnlock(arena);        /* StartMenuEntries stay valid until the next opening */
 }
 
 void StartMenuShow(HWND w, const RECT *button)
 {
     char renamed[MAX_PATH];
 
-    owner = w;
+    StartMenuOwner = w;
     if (!arena && (arena = GlobalAlloc(GMEM_MOVEABLE, ARENA_SIZE)) == NULL)
         return;
     for (;;) {
         Track(button);
-        if (out.what == TRACK_ITEM) {
-            if (FileCommandsItemMenu(w, out.path, TRUE, renamed) == CMD_BYNAME + IVSORT_NAME) {
-                PathToParent(out.path);
-                StartMenuOrderForget(out.path);
+        if (StartMenuOut.what == TRACK_ITEM && StartMenuOut.fixed) {
+            FrequentMenu(w, StartMenuOut.path);
+        } else if (StartMenuOut.what == TRACK_ITEM) {
+            if (FileMenusItem(w, StartMenuOut.path, TRUE, renamed) == CMD_BYNAME + IVSORT_NAME) {
+                PathToParent(StartMenuOut.path);
+                StartMenuOrderForget(StartMenuOut.path);
             } else if (*renamed) {
-                StartMenuOrderRename(out.path, renamed);
+                StartMenuOrderRename(StartMenuOut.path, renamed);
             }
-        } else if (out.what == TRACK_DROP) {
-            Move(w);
-            PathListFree(&out.order);
+        } else if (StartMenuOut.what == TRACK_DROP) {
+            StartMenuDragMove(w);
+            PathListFree(&StartMenuOut.order);
         } else {
             break;
         }
-        PostTrail(out.pos, out.depth);
+        StartMenuDragReopen();
     }
-    GhostsGone();
+    StartMenuPicturesGone();
 }
 
 static void Command(int i)
 {
     ENTRY far *e;
 
-    if (i < 0 || i >= nEntries)
+    if (i < 0 || i >= StartMenuCount)
         return;
     heap = GlobalLock(arena);
-    e = entries[i];
+    e = StartMenuEntries[i];
     switch (e->special) {
-    case SPECIAL_RUN:      RunDialogShow(owner); break;
-    case SPECIAL_SHUTDOWN: ShutDownDialogShow(owner); break;
+    case SPECIAL_RUN:      RunDialogShow(StartMenuOwner); break;
+    case SPECIAL_SHUTDOWN: ShutDownDialogShow(StartMenuOwner); break;
     case SPECIAL_FIND:     FindShow(""); break;
     case SPECIAL_TASKBAR:  TaskbarPropertiesShow(); break;
-    case SPECIAL_FOLDEROPTS: FolderOptionsShow(); break;
-    default:               if (e->path) LaunchItem(owner, e->path);
+    case SPECIAL_FOLDEROPTS: FolderOptionsShow(NULL); break;
+    case SPECIAL_THEMES:   ThemeManagerShow(); break;
+    case SPECIAL_COMPUTER: FolderWindowOpen(""); break;
+    default:               if (e->path) LaunchItem(StartMenuOwner, e->path);
     }
     GlobalUnlock(arena);
 }
@@ -921,6 +570,8 @@ static void Command(int i)
 BOOL StartMenuMessage(HWND w, UINT msg, WPARAM wp, LPARAM lp, LRESULT *res)
 {
     int i;
+
+    HOOK_DESCRIBE_MENU_RES(msg, res, StartMenuDescribeMenu((HMENU)wp, (LPSTR)lp));
 
     switch (msg) {
     case WM_MEASUREITEM:
@@ -936,19 +587,18 @@ BOOL StartMenuMessage(HWND w, UINT msg, WPARAM wp, LPARAM lp, LRESULT *res)
         *res = TRUE;
         return TRUE;
     case SMM_MARK:
-        if (dragging)
-            Mark();
+        StartMenuDragMark();
         *res = 0;
         return TRUE;
     case WM_INITMENUPOPUP:
-        for (i = 0; i < nEntries; i++)
-            if (entries[i]->sub == (HMENU)wp && !entries[i]->filled)
-                FillSubmenu(entries[i]);
+        for (i = 0; i < StartMenuCount; i++)
+            if (StartMenuEntries[i]->sub == (HMENU)wp && !StartMenuEntries[i]->filled)
+                FillSubmenu(StartMenuEntries[i]);
         *res = 0;
         return TRUE;
     case WM_MENUCHAR:
-        for (i = 0; i < nEntries; i++) {
-            ENTRY far *e = entries[i];
+        for (i = 0; i < StartMenuCount; i++) {
+            ENTRY far *e = StartMenuEntries[i];
             if (e->parent == (HMENU)HIWORD(lp) && !e->separator && !e->disabled &&
                 MenuItemMatchesKey(e->label, e->mnemonic, wp)) {
                 *res = MAKELONG(e->pos, 2);         /* execute */

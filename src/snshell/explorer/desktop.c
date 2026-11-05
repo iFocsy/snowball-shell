@@ -18,8 +18,13 @@ LPCSTR DesktopMyDocuments(void)
 
     if (!path[0]) {
         SettingsGetString("Desktop", "MyDocuments", "C:\\My Documents", path, sizeof path);
-        if (!PathIsFolder(path))
-            DosMakeFolder(path);
+        if (!PathIsFolder(path)) {
+            char parent[MAX_PATH];
+            lstrcpy(parent, path);
+            PathToParent(parent);
+            if (!DosHasLongNames() || !DosLengthen(parent, PathFileName(path)))   /* MYDOCUME, made before */
+                DosMakeFolder(path);
+        }
     }
     return path;
 }
@@ -73,6 +78,47 @@ static void Open(void)
         }
 }
 
+/* The view's notifications (renaming's answer returned), else a command. */
+static LRESULT Command(HWND w, WPARAM wp, LPARAM lp)
+{
+    if (wp == ID_VIEW) {
+        switch (HIWORD(lp)) {
+        case IVN_OPEN:    Open(); break;
+        case IVN_CONTEXT: FileMenusContext(w, view); break;
+        case IVN_DRAG:
+        case IVN_RDRAG:   DragDropRun(view, HIWORD(lp) == IVN_RDRAG); break;
+        case IVN_RENAME:  return FileCommandsRenamed(w, view);
+        case IVN_SORTED:  FolderViewsSave(view); break;
+        }
+    } else if (wp == CMD_OPEN) {
+        Open();
+    } else if (wp == CMD_PROPERTIES && !IconViewSelectedCount(view)) {
+        DisplayPropertiesShow(0);
+    } else {
+        FileCommandsRun(w, view, wp);
+    }
+    return 0;
+}
+
+/* SBM_OPEN, from a second SNOWBALL.EXE: "SNOWBALL /E,C:\" explores. */
+static void OpenRequest(HWND w, ATOM atom)
+{
+    char what[MAX_PATH];
+
+    GlobalGetAtomName(atom, what, sizeof what);
+    GlobalDeleteAtom(atom);
+    if (!_fstrnicmp(what, "/E,", 3))
+        FolderWindowExplore(what + 3);
+    else if (!lstrcmpi(what, "/RESMETER"))
+        TaskbarResourceMeter();
+    else if (!lstrcmpi(what, "/CLEANUP"))
+        DiskCleanupShow(NULL, -1);
+    else if (!what[0] || !lstrcmp(what, BIN_PATH) || PathIsFolder(what))
+        FolderWindowOpen(what);
+    else
+        LaunchCommand(w, what, NULL, SW_SHOWNORMAL);
+}
+
 LRESULT CALLBACK __export DesktopProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
     char dir[MAX_PATH];
@@ -91,23 +137,7 @@ LRESULT CALLBACK __export DesktopProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         SetFocus(view);
         return 0;
     case WM_COMMAND:
-        if (wp == ID_VIEW) {
-            switch (HIWORD(lp)) {
-            case IVN_OPEN:    Open(); break;
-            case IVN_CONTEXT: FileCommandsContextMenu(w, view); break;
-            case IVN_DRAG:
-            case IVN_RDRAG:   DragDropRun(view, HIWORD(lp) == IVN_RDRAG); break;
-            case IVN_RENAME:  return FileCommandsRenamed(w, view);
-            case IVN_SORTED:  FileCommandsSaveView(view); break;
-            }
-        } else if (wp == CMD_OPEN) {
-            Open();
-        } else if (wp == CMD_PROPERTIES && !IconViewSelectedCount(view)) {
-            DisplayPropertiesShow(0);
-        } else {
-            FileCommandsRun(w, view, wp);
-        }
-        return 0;
+        return Command(w, wp, lp);
     case SBM_CHANGED:                   /* NULL: Folder Options changed */
         DesktopFolder(dir);
         if (!lp || !lstrcmpi((LPCSTR)lp, dir) || !lstrcmp((LPCSTR)lp, BIN_PATH))
@@ -116,15 +146,8 @@ LRESULT CALLBACK __export DesktopProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     case WM_DROPFILES:
         FileCommandsDropFiles(view, (HDROP)wp);
         return 0;
-    case SBM_OPEN:                      /* from a second SNOWBALL.EXE */
-        GlobalGetAtomName((ATOM)LOWORD(lp), dir, sizeof dir);
-        GlobalDeleteAtom((ATOM)LOWORD(lp));
-        if (!_fstrnicmp(dir, "/E,", 3))       /* "SNOWBALL /E,C:\" explores */
-            FolderWindowExplore(dir + 3);
-        else if (!dir[0] || !lstrcmp(dir, BIN_PATH) || PathIsFolder(dir))
-            FolderWindowOpen(dir);
-        else
-            LaunchCommand(w, dir, NULL, SW_SHOWNORMAL);
+    case SBM_OPEN:
+        OpenRequest(w, (ATOM)LOWORD(lp));
         return 0;
     case WM_KEYDOWN:
         FileCommandsKey(w, view, wp);
@@ -138,17 +161,10 @@ LRESULT CALLBACK __export DesktopProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 BOOL DesktopCreate(void)
 {
-    WNDCLASS wc;
     char dir[MAX_PATH];
     int cx = GetSystemMetrics(SM_CXSCREEN), cy = GetSystemMetrics(SM_CYSCREEN);
 
-    _fmemset(&wc, 0, sizeof wc);
-    wc.lpfnWndProc = DesktopProc;
-    wc.hInstance = g_hInst;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = IconStock(IDI_SNOWBALL);
-    wc.lpszClassName = DESKTOP_CLASS;
-    if (!RegisterClass(&wc))
+    if (!WindowRegister(DESKTOP_CLASS, DesktopProc, 0, 0, IconStock(IDI_SNOWBALL), NULL))
         return FALSE;
     desk = CreateWindow(DESKTOP_CLASS, "Desktop", WS_POPUP | WS_CLIPCHILDREN,
                         0, 0, cx, cy, NULL, NULL, g_hInst, NULL);
@@ -160,7 +176,7 @@ BOOL DesktopCreate(void)
     if (!PathIsFolder(dir))
         DosMakeFolder(dir);
     DragAcceptFiles(view, TRUE);
-    FileCommandsLoadView(view);
+    FolderViewsLoad(view, FALSE);
     Refresh(FALSE);
     ShowWindow(desk, SW_SHOWNOACTIVATE);
     return TRUE;

@@ -1,5 +1,7 @@
 /*
- * SbTabs: the tabs and the raised panel of a Windows 98 property sheet.
+ * SbTabs: the tabs and the raised panel of a Windows 98 property sheet
+ * (without the Windows 98 style, outlined in black as Windows 3.1's
+ * buttons, in the dialog's font: as the tabs of programs of its time).
  * Only the tabs and the panel's edge are drawn: the inside belongs to the
  * dialog (its separators, a pie) and the page controls, siblings laid over
  * the panel (WS_CLIPSIBLINGS keeps this control off them). Arrow keys or a
@@ -12,17 +14,24 @@
 typedef struct {
     char labels[MAX_TABS][24];
     int  count, sel;
-    BYTE off[25];               /* page controls (id - IDC_PAGE1) disabled for their hidden page */
+    BYTE off[(50 * TABS_PAGES + 7) / 8];               /* page controls (id - IDC_PAGE1) disabled for their hidden page */
 } TABS;
 
 #define Tabs(w)     ((TABS *)LocalHeapPointer(GetWindowWord(w, 0)))
+
+/* The labels' font: the dialog's in Windows 3.1's look (bold). */
+static HFONT Font(HWND w)
+{
+    HFONT f = SkinWanted(w) ? NULL : (HFONT)SendMessage(GetParent(w), WM_GETFONT, 0, 0L);
+    return f ? f : DrawFont(FALSE);
+}
 
 /* Rectangle of tab i (the chosen one stands 2 pixels out on three sides). */
 static void TabRect(HWND w, int i, RECT *r)
 {
     TABS *t = Tabs(w);
     HDC dc = GetDC(w);
-    HFONT old = SelectObject(dc, DrawFont(FALSE));
+    HFONT old = SelectObject(dc, Font(w));
     int k, x = 2, width = 0;
 
     for (k = 0; k <= i; k++) {
@@ -36,12 +45,45 @@ static void TabRect(HWND w, int i, RECT *r)
         InflateRect(r, 2, 2);
 }
 
+/* A tab's edges: Windows 98's (light, then shadow and black on the right),
+   or outlined in black with a light and a shadow line inside. */
+static void TabEdges(HDC dc, const RECT *r, BOOL flat)
+{
+    COLORREF light = GetSysColor(COLOR_BTNHIGHLIGHT), shadow = GetSysColor(COLOR_BTNSHADOW);
+    COLORREF outer = flat ? GetSysColor(COLOR_WINDOWFRAME) : light;
+    RECT e;
+
+    SetRect(&e, r->left, r->top + 2, r->left + 1, r->bottom);           /* left edge */
+    DrawSolidRect(dc, &e, outer);
+    SetRect(&e, r->left + 1, r->top + 1, r->left + 2, r->top + 2);      /* rounded corner */
+    DrawSolidRect(dc, &e, outer);
+    SetRect(&e, r->left + 2, r->top, r->right - 2, r->top + 1);         /* top */
+    DrawSolidRect(dc, &e, outer);
+    if (!flat) {
+        SetRect(&e, r->right - 2, r->top + 1, r->right - 1, r->bottom); /* right: shadow, then black */
+        DrawSolidRect(dc, &e, shadow);
+        SetRect(&e, r->right - 1, r->top + 2, r->right, r->bottom);
+        DrawSolidRect(dc, &e, SkinColor(SC_DKSHADOW));
+        return;
+    }
+    SetRect(&e, r->right - 2, r->top + 1, r->right - 1, r->top + 2);    /* the other corner, the right */
+    DrawSolidRect(dc, &e, outer);
+    SetRect(&e, r->right - 1, r->top + 2, r->right, r->bottom);
+    DrawSolidRect(dc, &e, outer);
+    SetRect(&e, r->left + 1, r->top + 2, r->left + 2, r->bottom);       /* inside: light, shadow */
+    DrawSolidRect(dc, &e, light);
+    SetRect(&e, r->left + 2, r->top + 1, r->right - 2, r->top + 2);
+    DrawSolidRect(dc, &e, light);
+    SetRect(&e, r->right - 2, r->top + 2, r->right - 1, r->bottom);
+    DrawSolidRect(dc, &e, shadow);
+}
+
 static void Paint(HWND w)
 {
     TABS *t = Tabs(w);
+    BOOL flat = !SkinWanted(w);
     PAINTSTRUCT ps;
     RECT c, r, e;
-    COLORREF light = GetSysColor(COLOR_BTNHIGHLIGHT), shadow = GetSysColor(COLOR_BTNSHADOW);
     HFONT old;
     int i;
 
@@ -50,24 +92,21 @@ static void Paint(HWND w)
     SetRect(&r, 0, 0, c.right, TABS_H);
     DrawSolidRect(ps.hdc, &r, GetSysColor(COLOR_BTNFACE));
     SetRect(&r, 0, TABS_H, c.right, c.bottom);   /* the panel's edge only */
-    DrawBevel(ps.hdc, &r, FALSE);
-    old = SelectObject(ps.hdc, DrawFont(FALSE));
+    if (flat) {
+        DrawFrame(ps.hdc, &r, GetSysColor(COLOR_WINDOWFRAME), GetSysColor(COLOR_WINDOWFRAME));
+        InflateRect(&r, -1, -1);
+        DrawFrame(ps.hdc, &r, GetSysColor(COLOR_BTNHIGHLIGHT), GetSysColor(COLOR_BTNSHADOW));
+    } else {
+        DrawBevel(ps.hdc, &r, FALSE);
+    }
+    old = SelectObject(ps.hdc, Font(w));
     SetBkMode(ps.hdc, TRANSPARENT);
     SetTextColor(ps.hdc, GetSysColor(COLOR_BTNTEXT));
     for (i = 0; i < t->count; i++) {
         TabRect(w, i, &r);
-        SetRect(&e, r.left, r.top + 2, r.left + 1, r.bottom);           /* left edge */
-        DrawSolidRect(ps.hdc, &e, light);
-        SetRect(&e, r.left + 1, r.top + 1, r.left + 2, r.top + 2);      /* rounded corner */
-        DrawSolidRect(ps.hdc, &e, light);
-        SetRect(&e, r.left + 2, r.top, r.right - 2, r.top + 1);         /* top */
-        DrawSolidRect(ps.hdc, &e, light);
-        SetRect(&e, r.right - 2, r.top + 1, r.right - 1, r.bottom);     /* right: shadow, then black */
-        DrawSolidRect(ps.hdc, &e, shadow);
-        SetRect(&e, r.right - 1, r.top + 2, r.right, r.bottom);
-        DrawSolidRect(ps.hdc, &e, RGB(0, 0, 0));
+        TabEdges(ps.hdc, &r, flat);
         if (i == t->sel) {                      /* open into the panel */
-            SetRect(&e, r.left + 1, TABS_H, r.right - 2, TABS_H + 1);
+            SetRect(&e, r.left + (flat ? 2 : 1), TABS_H, r.right - 2, TABS_H + (flat ? 2 : 1));
             DrawSolidRect(ps.hdc, &e, GetSysColor(COLOR_BTNFACE));
         }
         e = r;
@@ -103,8 +142,8 @@ void TabsAdd(HWND tabs, LPCSTR label)
 }
 
 /* A page's controls have ids from IDC_PAGE1 + 50 * page, 50 of them: those
-   of the page shown are shown (unless wanted says no), the others hidden. */
-/* Hidden pages' controls are disabled too: Windows 3.1 gives a mnemonic
+   of the page shown are shown (unless wanted says no), the others hidden.
+   Hidden pages' controls are disabled too: Windows 3.1 gives a mnemonic
    (Alt+C) to a hidden control with it before the page's own. Shown again,
    only those it disabled come back. */
 void TabsShowPage(HWND dlg, int page, BOOL (*wanted)(HWND dlg, int id))
@@ -116,7 +155,7 @@ void TabsShowPage(HWND dlg, int page, BOOL (*wanted)(HWND dlg, int id))
 
     for (c = GetWindow(dlg, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
         id = GetDlgCtrlID(c);
-        if (id < IDC_PAGE1 || id >= IDC_PAGE1 + 50 * 4)
+        if (id < IDC_PAGE1 || id >= IDC_PAGE1 + 50 * TABS_PAGES)
             continue;
         show = id >= first && id < first + 50 && (!wanted || wanted(dlg, id));
         ShowWindow(c, show ? SW_SHOW : SW_HIDE);
@@ -153,6 +192,7 @@ LRESULT CALLBACK __export TabsProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     POINT p;
     int i;
 
+    HOOK_DESCRIBE(msg, TabsDescribe(w, (LPSTR)lp, wp));
     switch (msg) {
     case WM_CREATE:
         t = LocalHeapAlloc(sizeof(TABS));
@@ -202,15 +242,8 @@ LRESULT CALLBACK __export TabsProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 BOOL TabsRegister(void)
 {
-    WNDCLASS wc;
 
-    _fmemset(&wc, 0, sizeof wc);
-    wc.lpfnWndProc = TabsProc;
-    wc.cbWndExtra = sizeof(WORD);
-    wc.hInstance = g_hInst;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = TABS_CLASS;
-    return RegisterClass(&wc);
+    return WindowRegister(TABS_CLASS, TabsProc, 0, sizeof(WORD), NULL, NULL);
 }
 
 /* A modeless sheet's OK, Apply and Cancel; FALSE for any other control. */
@@ -222,3 +255,17 @@ BOOL SheetButton(HWND dlg, UINT id, void (*apply)(HWND dlg))
         DestroyWindow(dlg);
     return id == IDOK || id == IDC_APPLY || id == IDCANCEL;
 }
+
+#ifdef SNOWBALL_HOOKS
+/* The tests' hooks (src\hooks): tab i's label, and if it is the selected one;
+   NULL past the last. */
+LPCSTR TabsLabel(HWND w, int i, BOOL *selected)
+{
+    TABS *t = Tabs(w);
+
+    if (!t || i >= t->count)
+        return NULL;
+    *selected = i == t->sel;
+    return t->labels[i];
+}
+#endif

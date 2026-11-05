@@ -73,8 +73,6 @@ static LPCSTR Patterns(HWND dlg)
     return i < 0 ? allFiles : (LPCSTR)SendMessage(cb, CB_GETITEMDATA, i, 0L);
 }
 
-/* ---- Look in: Desktop, My Computer, the drives, the folders down to the one shown ---- */
-
 /* ---- the folder shown ---- */
 
 static void EnableTools(HWND dlg, FD *fd)
@@ -104,7 +102,7 @@ static void Reload(FD *fd, BOOL keep)
 static BOOL Reachable(LPCSTR path)
 {
     char spec[8];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
     WORD error;
 
@@ -301,34 +299,71 @@ static void Follow(FD *fd, LPSTR path)
 
 static void Opened(HWND dlg, FD *fd);
 
-/* Open or Save: a name, a folder to go into, or patterns to list by. */
-static void Ok(HWND dlg, FD *fd)
+/* What File name says, its quotes off; FALSE when that was all: nothing
+   typed (the item chosen in the view opens), several files chosen, or
+   patterns to list by. */
+static BOOL Typed(HWND dlg, FD *fd, LPSTR text)
 {
-    OPENFILENAME FAR *o = fd->ofn;
-    char text[MAX_PATH], path[MAX_PATH], result[MAX_PATH];
     LPSTR p;
-    BOOL exists;
 
-    GetDlgItemText(dlg, IDC_OPENSAVE_NAME, text, sizeof text);
-    if (!*text) {                       /* the item chosen in the view */
+    GetDlgItemText(dlg, IDC_OPENSAVE_NAME, text, MAX_PATH);
+    if (!*text) {
         Opened(dlg, fd);
-        return;
+        return FALSE;
     }
-    if ((o->Flags & OFN_ALLOWMULTISELECT) && !lstrcmp(text, fd->put) && IconViewSelectedCount(fd->view) > 1) {
+    if ((fd->ofn->Flags & OFN_ALLOWMULTISELECT) && !lstrcmp(text, fd->put) && IconViewSelectedCount(fd->view) > 1) {
         GiveMany(dlg, fd);
-        return;
+        return FALSE;
     }
     if (*text == '"') {
-        lstrcpy(text, text + 1);
+        _fmemmove(text, text + 1, lstrlen(text));
         if ((p = _fstrchr(text, '"')) != NULL)
             *p = '\0';
     }
-    if (_fstrpbrk(text, "*?")) {
-        lstrcpyn(fd->only, text, sizeof fd->only);
-        Reload(fd, FALSE);
-        return;
+    if (!_fstrpbrk(text, "*?"))
+        return TRUE;
+    lstrcpyn(fd->only, text, sizeof fd->only);
+    Reload(fd, FALSE);
+    return FALSE;
+}
+
+/* A new name gets the default extension; then what the program asked to
+   be checked or asked. FALSE: not this file. */
+static BOOL Allowed(HWND dlg, FD *fd, LPCSTR text, LPSTR path)
+{
+    OPENFILENAME FAR *o = fd->ofn;
+    char dir[MAX_PATH];
+    BOOL exists = DosGetAttributes(path) != 0xFFFF;
+
+    if (!exists && o->lpstrDefExt && *o->lpstrDefExt && !*PathExtension(PathFileName(path)) &&
+        lstrlen(path) + lstrlen(o->lpstrDefExt) + 1 < MAX_PATH) {
+        lstrcat(path, ".");
+        lstrcat(path, o->lpstrDefExt);
+        exists = DosGetAttributes(path) != 0xFFFF;
     }
-    if (!Resolve(fd, text, path))
+    lstrcpy(dir, path);
+    PathToParent(dir);
+    if (!PathIsFolder(dir)) {
+        Say(dlg, "%s\nPath does not exist.\nPlease verify the correct path was given.", text, MB_OK | MB_ICONEXCLAMATION);
+        return FALSE;
+    }
+    if (!exists && !fd->req->save && (o->Flags & OFN_FILEMUSTEXIST)) {
+        Say(dlg, "%s\nFile not found.\nPlease verify the correct file name was given.", text, MB_OK | MB_ICONEXCLAMATION);
+        return FALSE;
+    }
+    if (exists && fd->req->save && (o->Flags & OFN_OVERWRITEPROMPT))
+        return Say(dlg, "%s already exists.\nDo you want to replace it?", path, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
+    if (!exists && (o->Flags & OFN_CREATEPROMPT))
+        return Say(dlg, "%s\nThis file does not exist.\nDo you want to create the file?", path, MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
+    return TRUE;
+}
+
+/* Open or Save: a name, a folder to go into, or patterns to list by. */
+static void Ok(HWND dlg, FD *fd)
+{
+    char text[MAX_PATH], path[MAX_PATH], result[MAX_PATH];
+
+    if (!Typed(dlg, fd, text) || !Resolve(fd, text, path))
         return;
     Follow(fd, path);
     if (PathIsFolder(path)) {
@@ -336,28 +371,7 @@ static void Ok(HWND dlg, FD *fd)
             SetDlgItemText(dlg, IDC_OPENSAVE_NAME, "");
         return;
     }
-    exists = DosGetAttributes(path) != 0xFFFF;
-    if (!exists && o->lpstrDefExt && *o->lpstrDefExt && !*PathExtension(PathFileName(path)) &&
-        lstrlen(path) + lstrlen(o->lpstrDefExt) + 1 < MAX_PATH) {
-        lstrcat(path, ".");
-        lstrcat(path, o->lpstrDefExt);
-        exists = DosGetAttributes(path) != 0xFFFF;
-    }
-    lstrcpy(result, path);
-    PathToParent(result);
-    if (!PathIsFolder(result)) {
-        Say(dlg, "%s\nPath does not exist.\nPlease verify the correct path was given.", text, MB_OK | MB_ICONEXCLAMATION);
-        return;
-    }
-    if (!exists && !fd->req->save && (o->Flags & OFN_FILEMUSTEXIST)) {
-        Say(dlg, "%s\nFile not found.\nPlease verify the correct file name was given.", text, MB_OK | MB_ICONEXCLAMATION);
-        return;
-    }
-    if (exists && fd->req->save && (o->Flags & OFN_OVERWRITEPROMPT) &&
-        Say(dlg, "%s already exists.\nDo you want to replace it?", path, MB_YESNO | MB_ICONEXCLAMATION) != IDYES)
-        return;
-    if (!exists && (o->Flags & OFN_CREATEPROMPT) &&
-        Say(dlg, "%s\nThis file does not exist.\nDo you want to create the file?", path, MB_YESNO | MB_ICONEXCLAMATION) != IDYES)
+    if (!Allowed(dlg, fd, text, path))
         return;
     if (!ForProgram(fd, path, result)) {
         Say(dlg, "%s\nThe file name is not valid.", text, MB_OK | MB_ICONEXCLAMATION);
@@ -550,7 +564,7 @@ static void Command(HWND dlg, FD *fd, UINT id, HWND ctl, UINT code)
         switch (code) {
         case IVN_OPEN:    Opened(dlg, fd); break;
         case IVN_SELECT:  Picked(dlg, fd); break;
-        case IVN_CONTEXT: FileCommandsContextMenu(dlg, fd->view); break;
+        case IVN_CONTEXT: FileMenusContext(dlg, fd->view); break;
         case IVN_DRAG:
         case IVN_RDRAG:   DragDropRun(fd->view, code == IVN_RDRAG); break;
         case IVN_RENAME:  SetWindowLong(dlg, DWL_MSGRESULT, FileCommandsRenamed(dlg, fd->view)); break;

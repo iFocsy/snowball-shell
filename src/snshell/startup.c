@@ -31,9 +31,10 @@ static void RunProfileLine(LPCSTR key, int show)
 void StartupRun(LPCSTR cmdLine)
 {
     char dir[MAX_PATH], path[MAX_PATH];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
 
+    WallpaperCheck();
     if (*cmdLine)
         LaunchCommand(NULL, cmdLine, NULL, SW_SHOWNORMAL);
     if (GetAsyncKeyState(VK_SHIFT) < 0)     /* Shift held: skip, as in Windows */
@@ -48,7 +49,7 @@ void StartupRun(LPCSTR cmdLine)
         do {
             lstrcpy(path, dir);
             PathAppend(path, e.name);
-            if (!(e.attr & 0x16))
+            if (!(e.attr & (FA_HIDDEN | FA_SYSTEM | FA_DIR)))
                 LaunchItem(NULL, path);
         } while (DosFindNext(&f, &e));
         DosFindClose(&f);

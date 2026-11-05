@@ -84,23 +84,47 @@ static BOOL IsTaskModule(HMODULE module)
     return FALSE;
 }
 
-/* What each row's owners hold in the global heap. */
+typedef struct { WORD h; BYTE row; } OWNER;
+
+static int CompareOwners(const void far *a, const void far *b)
+{
+    WORD x = ((const OWNER far *)a)->h, y = ((const OWNER far *)b)->h;
+    return x < y ? -1 : x > y;
+}
+
+/* What each row's owners (its module; a task's own blocks too) hold in the
+   global heap. The heap has thousands of blocks: each one's owner is looked
+   up in the sorted owners, not compared with every row. */
 static void Memory(void)
 {
+    OWNER owners[2 * MAX_ROWS];
     GLOBALENTRY ge;
-    HANDLE owner;
     BOOL more;
-    int i;
+    int i, n = 0, lo, hi, mid;
 
-    for (i = 0; i < nrows; i++)
+    for (i = 0; i < nrows; i++) {
         rows[i].mem = 0;
+        if (rows[i].module) {
+            owners[n].h = (WORD)rows[i].module;
+            owners[n++].row = (BYTE)i;
+        }
+        if (rows[i].kind != PK_LIB && rows[i].task) {
+            owners[n].h = (WORD)rows[i].task;
+            owners[n++].row = (BYTE)i;
+        }
+    }
+    SortRecords(owners, n, sizeof owners[0], CompareOwners);
     ge.dwSize = sizeof ge;
     for (more = GlobalFirst(&ge, GLOBAL_ALL); more; more = GlobalNext(&ge, GLOBAL_ALL)) {
-        if (ge.wType == GT_FREE || !(owner = ge.hOwner))
+        if (ge.wType == GT_FREE || !ge.hOwner)
             continue;
-        for (i = 0; i < nrows; i++)
-            if ((HANDLE)rows[i].module == owner || (rows[i].kind != PK_LIB && (HANDLE)rows[i].task == owner))
-                rows[i].mem += ge.dwBlockSize;
+        for (lo = 0, hi = n; lo < hi; )         /* the first of that owner */
+            if (owners[mid = (lo + hi) / 2].h < (WORD)ge.hOwner)
+                lo = mid + 1;
+            else
+                hi = mid;
+        for (; lo < n && owners[lo].h == (WORD)ge.hOwner; lo++)
+            rows[owners[lo].row].mem += ge.dwBlockSize;
     }
 }
 

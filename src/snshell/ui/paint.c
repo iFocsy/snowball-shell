@@ -43,19 +43,23 @@ static int Load(int id)
 /* w x h pixels of bitmap s from sx, at (x, y). */
 static void Blit(HDC dc, int x, int y, int s, int sx, int w, int h)
 {
-    HDC src = CreateCompatibleDC(dc), mask = CreateCompatibleDC(dc);
-    HBITMAP old1 = SelectObject(src, bitmaps[s].bmp), old2 = SelectObject(mask, bitmaps[s].mask);
-    COLORREF bk = SetBkColor(dc, RGB(255, 255, 255)), fg = SetTextColor(dc, RGB(0, 0, 0));
+    HDC mem = DrawMemoryDC();           /* (the skin's: a toolbar draws a dozen images a paint) */
+    HBITMAP old;
+    COLORREF bk, fg;
 
-    BitBlt(dc, x, y, w, h, src, sx, 0, SRCINVERT);
-    BitBlt(dc, x, y, w, h, mask, sx, 0, SRCAND);
-    BitBlt(dc, x, y, w, h, src, sx, 0, SRCINVERT);
+    if (!mem)
+        return;
+    old = SelectObject(mem, bitmaps[s].bmp);
+    bk = SetBkColor(dc, RGB(255, 255, 255));
+    fg = SetTextColor(dc, RGB(0, 0, 0));
+    BitBlt(dc, x, y, w, h, mem, sx, 0, SRCINVERT);
+    SelectObject(mem, bitmaps[s].mask);
+    BitBlt(dc, x, y, w, h, mem, sx, 0, SRCAND);
+    SelectObject(mem, bitmaps[s].bmp);
+    BitBlt(dc, x, y, w, h, mem, sx, 0, SRCINVERT);
     SetBkColor(dc, bk);
     SetTextColor(dc, fg);
-    SelectObject(src, old1);
-    SelectObject(mask, old2);
-    DeleteDC(src);
-    DeleteDC(mask);
+    SelectObject(mem, old);
 }
 
 /* One image of a strip of square images as tall as the strip. */
@@ -73,6 +77,38 @@ void PaintBitmap(HDC dc, int x, int y, int id)
 
     if (s >= 0)
         Blit(dc, x, y, s, 0, bitmaps[s].w, bitmaps[s].h);
+}
+
+/* Windows 98's progress bar in r: a sunken line, then blocks of c along
+   permille of it. */
+void PaintProgressBar(HDC dc, const RECT *r, int permille, COLORREF c)
+{
+    RECT in = *r, b;
+    int step, x, end;
+
+    DrawFrame(dc, r, GetSysColor(COLOR_BTNSHADOW), GetSysColor(COLOR_BTNHIGHLIGHT));
+    InflateRect(&in, -1, -1);
+    DrawSolidRect(dc, &in, GetSysColor(COLOR_BTNFACE));
+    InflateRect(&in, -1, -1);
+    end = in.left + (int)((long)(in.right - in.left) * max(0, min(permille, 1000)) / 1000);
+    step = (in.bottom - in.top) * 2 / 3 + 2;
+    for (x = in.left; x < end; x += step) {
+        SetRect(&b, x, in.top, min(x + step - 2, end), in.bottom);
+        DrawSolidRect(dc, &b, c);
+    }
+}
+
+/* A 50% checker in the DC's text and background colours (pressed task
+   buttons, the dimmed screen), made once. */
+HBRUSH PaintChecker(void)
+{
+    static WORD bits[8] = { 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA };
+    static HBITMAP pattern;
+    static HBRUSH brush;
+
+    if (!brush && (pattern = CreateBitmap(8, 8, 1, 1, bits)) != NULL)
+        brush = CreatePatternBrush(pattern);    /* (the bitmap stays: Windows 3.1's brush uses it) */
+    return brush;
 }
 
 /* A column header button of Details lists; pressed while clicked. */
@@ -165,16 +201,19 @@ BOOL StatusBarGrip(HWND w, LPARAM screenPoint)
 
 /* A list's row as Windows 98 draws one: the 16x16 icon at x, then the
    name; selected, the name highlighted, the focus rectangle around it. */
-void PaintListItem(const DRAWITEMSTRUCT FAR *d, int x, HICON icon, LPCSTR name)
+void PaintListItem(const DRAWITEMSTRUCT FAR *d, int x, HICON icon, LPCSTR name, BOOL bold)
 {
     RECT r = d->rcItem, t;
     BOOL sel = (d->itemState & ODS_SELECTED) != 0;
     HFONT old;
 
     DrawSolidRect(d->hDC, &r, GetSysColor(COLOR_WINDOW));
-    DrawIconImage(d->hDC, x, r.top + (r.bottom - r.top - 16) / 2, icon, TRUE);
-    old = SelectObject(d->hDC, DrawFont(FALSE));
-    SetRect(&t, x + 19, r.top + 1, min(r.right, x + 23 + (int)LOWORD(GetTextExtent(d->hDC, name, lstrlen(name)))),
+    if (icon) {
+        DrawIconImage(d->hDC, x, r.top + (r.bottom - r.top - 16) / 2, icon, TRUE);
+        x += 19;
+    }
+    old = SelectObject(d->hDC, DrawFont(bold));
+    SetRect(&t, x, r.top + 1, min(r.right, x + 4 + (int)LOWORD(GetTextExtent(d->hDC, name, lstrlen(name)))),
             r.bottom - 1);
     if (sel)
         DrawSolidRect(d->hDC, &t, GetSysColor(COLOR_HIGHLIGHT));

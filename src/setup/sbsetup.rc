@@ -1,11 +1,29 @@
 /* Built with the shell's resources folder in the include path. */
 #include <windows.h>
 #include "resource.h"
+#include "sbsetup.h"
 
 IDI_SNOWBALL    ICON "MAINICON.ICO"
 
+IDD_COMPONENTS DIALOG 0, 0, 268, 174
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "Snowball Setup"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT       "Select the components to install. To change them later, run Setup again.", -1, 8, 8, 252, 10
+    CONTROL     "&Snowball Shell", IDC_SHELLPART, "Button", BS_AUTOCHECKBOX | WS_DISABLED, 8, 26, 252, 10
+    LTEXT       "Desktop, taskbar, Start menu and folder windows. Required.", -1, 20, 37, 240, 9
+    CONTROL     "&Long File Name Support (LFN.DRV)", IDC_LFN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 52, 252, 10
+    LTEXT       "Provides the Windows 95 long file name functions to Windows programs. Requires long file name support in DOS.", -1, 20, 63, 240, 18
+    CONTROL     "&USER Resource Extension (USERX.DRV)", IDC_USERX, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 86, 252, 10
+    LTEXT       "Moves the contents of closed menus out of USER resources, increasing the amount free.", -1, 20, 97, 240, 9
+    CONTROL     "&GDI Resource Extension (GDIX.DRV)", IDC_GDIX, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 8, 112, 252, 10
+    LTEXT       "Moves display driver graphics data out of GDI resources, increasing the amount free. Disabled at startup if the display driver fails its compatibility test.", -1, 20, 123, 240, 18
+    DEFPUSHBUTTON "OK", IDOK, 109, 154, 50, 14
+END
+
 #define VER_TYPE        VFT_APP
-#define VER_DESCRIPTION "Snowball Setup's helper: INI files, system font, long file names\0"
+#define VER_DESCRIPTION "Snowball Setup's helper: INI files, system font, drivers\0"
 #define VER_NAME        "SBSETUP\0"
 #define VER_FILE        "SBSETUP.EXE\0"
 #include "..\include\version.rc"

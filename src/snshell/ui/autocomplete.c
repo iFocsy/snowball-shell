@@ -92,7 +92,7 @@ static void MakeList(void)
    files of C:\ that start so; none: the list goes. */
 static void Update(HWND edit)
 {
-    static DOSENTRY e;
+    DOSENTRY e;
     char text[MAX_PATH], spec[MAX_PATH], path[MAX_PATH], cls[16];
     HWND field = edit;
     LPSTR slash;

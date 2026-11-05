@@ -16,12 +16,13 @@ $root = $PSScriptRoot
 $stage = Join-Path $root 'build\setup\stage'
 Remove-Item $stage -Recurse -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
-foreach ($f in 'SNOWBALL.EXE', 'SNSHELL.DLL', 'SNSYSTEM.DLL', 'W98ART.DLL', 'SBSETUP.EXE', 'OPEN.COM', 'LFN.DRV') {
+foreach ($f in 'SNOWBALL.EXE', 'SNSHELL.DLL', 'SNSYSTEM.DLL', 'W98ART.DLL', 'SBSETUP.EXE', 'OPEN.COM', 'LFN.DRV', 'USERX.DRV', 'GDIX.DRV') {
   if (-not (Test-Path (Join-Path $root "release\$f"))) { throw "release\$f is missing: run build.ps1 first." }
   Copy-Item (Join-Path $root "release\$f") $stage
 }
 Copy-Item (Join-Path $root 'LICENSE') "$stage\LICENSE.TXT"
-Copy-Item (Join-Path $root 'redist\LFN.TXT'), "$root\src\setup\INFO.TXT", "$root\src\setup\SNOWBALL.ISS" $stage
+Copy-Item (Join-Path $root 'redist\LFN.TXT'), (Join-Path $root 'redist\RESEXT.TXT'), "$root\src\setup\INFO.TXT", "$root\src\setup\NOTICE.TXT",
+  "$root\src\setup\SNOWBALL.ISS" $stage
 
 # Inno Setup's compiler runs under winevdm, or else in Windows 3.1 under DOSBox-X
 $inno = Get-BuildTool inno -Auto:$Auto

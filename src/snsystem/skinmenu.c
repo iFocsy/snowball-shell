@@ -56,37 +56,171 @@ static void EtchSeparators(HWND w)
     ReleaseDC(w, dc);
 }
 
-/* The menu a submenu opens from: the one shown last. */
+static RECT chosen;                     /* the owner-drawn item last drawn selected, on the screen */
+#define MAX_PICTURES 8
+static RECT picRect[MAX_PICTURES];      /* menus (window, screen) as they were, */
+static HBITMAP picBmp[MAX_PICTURES];    /* their pictures (the caller's) */
+static int nPictures;
+#define MAX_OPEN    8
+static HWND open[MAX_OPEN];             /* menu windows placed and not hidden since, in that order */
+static int nOpen;
+
+/* A menu's client area on the screen. */
+static void ClientOnScreen(HWND m, RECT *c)
+{
+    POINT o = { 0, 0 };
+
+    GetClientRect(m, c);
+    ClientToScreen(m, &o);
+    OffsetRect(c, o.x, o.y);
+}
+
+/* A menu window is placed or shown, or hidden. Windows may place a
+   submenu before it shows the menu it opens from (keys typed fast). */
+static void Placed(HWND w, const WINDOWPOS FAR *p)
+{
+    int i;
+
+    for (i = 0; i < nOpen && open[i] != w; i++)
+        ;
+    if (p->flags & SWP_HIDEWINDOW) {
+        if (i < nOpen)
+            _fmemmove(open + i, open + i + 1, (--nOpen - i) * sizeof open[0]);
+    } else if ((!(p->flags & SWP_NOMOVE) || (p->flags & SWP_SHOWWINDOW)) && i == nOpen && nOpen < MAX_OPEN) {
+        open[nOpen++] = w;
+    }
+}
+
+/* The menu a submenu opens from: the one with the owner-drawn item chosen
+   last, else the one placed last. */
 static HWND OpenedFrom(HWND w)
 {
-    char cls[8];
-    HWND m;
+    HWND last = NULL;
+    RECT c;
+    int i;
 
-    for (m = GetWindow(GetDesktopWindow(), GW_CHILD); m; m = GetWindow(m, GW_HWNDNEXT)) {
-        GetClassName(m, cls, sizeof cls);
-        if (m != w && IsWindowVisible(m) && !lstrcmp(cls, "#32768"))
-            return m;
+    for (i = nOpen - 1; i >= 0; i--) {
+        if (open[i] == w || !IsWindow(open[i]))
+            continue;
+        ClientOnScreen(open[i], &c);
+        if (chosen.right > chosen.left && chosen.left >= c.left && chosen.right <= c.right &&
+            chosen.top >= c.top && chosen.bottom <= c.bottom)
+            return open[i];
+        if (!last)
+            last = open[i];
     }
-    return NULL;
+    return last;
+}
+
+/* From the hooks: an owner-drawn item drawn (NULL: a menu starts). */
+void SkinMenuDrawn(const DRAWITEMSTRUCT FAR *d)
+{
+    DWORD org;
+
+    if (!d) {
+        SetRectEmpty(&chosen);
+        nOpen = 0;
+    } else if (d->CtlType == ODT_MENU && (d->itemState & ODS_SELECTED)) {
+        org = GetDCOrg(d->hDC);
+        chosen = d->rcItem;
+        OffsetRect(&chosen, LOWORD(org), HIWORD(org));
+    }
+}
+
+/* The screen top of the item highlighted in menu m, or -1: searched for
+   down a column near its right (past a banner and the submenu arrow). */
+static int HighlightTop(HWND m)
+{
+    HDC dc = GetDC(m);
+    COLORREF hi = GetNearestColor(dc, GetSysColor(COLOR_HIGHLIGHT));
+    POINT o = { 0, 0 };
+    RECT c;
+    int x, y;
+
+    GetClientRect(m, &c);
+    x = c.right - 4;
+    for (y = 0; y < c.bottom && GetPixel(dc, x, y) != hi; y += 4)    /* items are higher */
+        ;
+    while (y > 0 && y < c.bottom && GetPixel(dc, x, y - 1) == hi)
+        y--;
+    ReleaseDC(m, dc);
+    ClientToScreen(m, &o);
+    return y < c.bottom ? o.y + y : -1;
 }
 
 /* A submenu covers only its menu's edge (Windows 3.1's covered 9 pixels,
-   arrows too): on the right, else on the left. Any menu stays on the
-   screen at its new size. */
-static void PlaceMenu(HWND w, int FAR *x, int FAR *y, int cx, int cy)
+   arrows too): on the right, else on the left; beside its item's column
+   (Windows 3.1 put it past the last). One too long to go down from its item
+   goes up only as far as it must, beside it (Windows 3.1 put it all above
+   the item). Any menu stays on the screen at its new size. Not skinned:
+   Windows 3.1's place, only beside an owner-drawn item's column. */
+static void PlaceMenu(HWND w, int FAR *x, int FAR *y, int cx, int cy, BOOL skinned)
 {
     HWND from = OpenedFrom(w);
-    RECT r, area;
+    RECT r, c, area;
+    int top, before = 0, after = 0;
 
     HookArea(&area);                    /* the screen less the taskbar */
     if (from) {
         GetWindowRect(from, &r);
-        *x = r.right - MENU_GROW;
+        ClientOnScreen(from, &c);
+        if (chosen.left >= c.left && chosen.right <= c.right && chosen.top >= c.top && chosen.bottom <= c.bottom &&
+            chosen.right > chosen.left) {       /* owner-drawn: its item is known */
+            before = chosen.left - c.left;      /* (less: Windows' margin, no other column) */
+            after = c.right - chosen.right;
+            before = before < 8 ? 0 : before;
+            after = after < 8 ? 0 : after;
+            top = chosen.top;
+        } else if (skinned) {
+            top = HighlightTop(from);
+        }
+        if (!skinned) {
+            *x += *x < r.left ? before : -after;
+            return;
+        }
+        *x = r.right - after - MENU_GROW;
         if (*x + cx > area.right)
-            *x = r.left - cx + MENU_GROW;
+            *x = r.left + before - cx + MENU_GROW;
+        /* (its items start 3 pixels in: level with the item's) */
+        if (*y + cy <= r.bottom && top >= 0 && *y + cy <= top + 3)
+            *y = top - 3;
     }
     *x = max(area.left, min(*x, area.right - cx));
     *y = max(area.top, min(*y, area.bottom - cy));
+}
+
+/* A program that ends its menu to open it again (the shell's Start menu, for
+   an item's own menu or a move) gives pictures of its menus as they were: a
+   menu window erased in the same place is given its picture instead, which
+   the items then paint over (else they would be blank until then: Windows
+   paints after the keys that open the menu again). n 0: none. */
+void SNSYSTEM_API SkinMenuPictures(const RECT FAR *r, const HBITMAP FAR *b, int n)
+{
+    nPictures = min(n, MAX_PICTURES);
+    _fmemcpy(picRect, r, nPictures * sizeof *r);
+    _fmemcpy(picBmp, b, nPictures * sizeof *b);
+}
+
+static BOOL ErasePicture(HWND w, HDC dc)
+{
+    POINT o = { 0, 0 };
+    HBITMAP old;
+    HDC mem;
+    RECT r, c;
+    int i;
+
+    GetWindowRect(w, &r);
+    for (i = 0; i < nPictures && !EqualRect(&r, &picRect[i]); i++)
+        ;
+    if (i == nPictures || (mem = CreateCompatibleDC(dc)) == NULL)
+        return FALSE;
+    ClientToScreen(w, &o);
+    GetClientRect(w, &c);
+    old = SelectObject(mem, picBmp[i]);
+    BitBlt(dc, 0, 0, c.right, c.bottom, mem, o.x - r.left, o.y - r.top, SRCCOPY);
+    SelectObject(mem, old);
+    DeleteDC(mem);
+    return TRUE;
 }
 
 LRESULT CALLBACK __export SkinMenuProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
@@ -96,8 +230,15 @@ LRESULT CALLBACK __export SkinMenuProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     RECT now;
     LRESULT res;
 
-    if (!HookSkinning())                /* a menu of a program left as it was */
+    if (msg == WM_ERASEBKGND && nPictures && ErasePicture(w, (HDC)wp))
+        return 1;
+    if (!HookSkinning()) {              /* a menu of a program left as it was */
+        if (msg == WM_WINDOWPOSCHANGING && !(p->flags & SWP_NOMOVE) && !(p->flags & SWP_NOSIZE))
+            PlaceMenu(w, &p->x, &p->y, p->cx, p->cy, FALSE);
+        if (msg == WM_WINDOWPOSCHANGING)
+            Placed(w, p);
         return SkinCallOld(w, msg, wp, lp);
+    }
     switch (msg) {
     case WM_NCCALCSIZE:
         r->left += 2;
@@ -116,7 +257,8 @@ LRESULT CALLBACK __export SkinMenuProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         }
         if (!(p->flags & SWP_NOMOVE))
             PlaceMenu(w, &p->x, &p->y, p->flags & SWP_NOSIZE ? now.right - now.left : p->cx,
-                      p->flags & SWP_NOSIZE ? now.bottom - now.top : p->cy);
+                      p->flags & SWP_NOSIZE ? now.bottom - now.top : p->cy, TRUE);
+        Placed(w, p);
         break;
     }
     res = SkinCallOld(w, msg, wp, lp);
@@ -152,13 +294,10 @@ void SkinMenus(BOOL on)
     for (w = GetWindow(GetDesktopWindow(), GW_CHILD); w; w = GetWindow(w, GW_HWNDNEXT)) {
         if (!SkinIsMenu(w))
             continue;
-        if (on) {
+        if (on)
             SkinSubclass(w, SkinMenuProc);
-        } else if (GetProp(w, OLD_HI)) {
-            SetWindowLong(w, GWL_WNDPROC, MAKELONG(GetProp(w, OLD_LO), GetProp(w, OLD_HI)));
-            RemoveProp(w, OLD_LO);
-            RemoveProp(w, OLD_HI);
-        }
+        else
+            SkinUnsubclass(w);
     }
 }
 

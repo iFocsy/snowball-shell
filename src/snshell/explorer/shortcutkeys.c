@@ -11,7 +11,7 @@
 #define MAX_KEYS    32
 #define MAX_DEPTH   4
 
-static char paths[MAX_KEYS][MAX_PATH];
+static PATHLIST paths;                  /* of the keys, in their order */
 static WORD keys[MAX_KEYS];
 static int nKeys;
 static WNDPROC editProc;
@@ -19,9 +19,9 @@ static WNDPROC editProc;
 static void Scan(LPCSTR dir, int depth)
 {
     static DOSENTRY e;                  /* large: the recursion keeps only the search */
-    static SHORTCUT s;
     char spec[MAX_PATH], path[MAX_PATH];
     DOSFIND f;
+    WORD key;
 
     lstrcpy(spec, dir);
     PathAppend(spec, "*.*");
@@ -33,9 +33,9 @@ static void Scan(LPCSTR dir, int depth)
         if (e.attr & FA_DIR) {
             if (depth < MAX_DEPTH)
                 Scan(path, depth + 1);
-        } else if (PathIsShortcut(path) && nKeys < MAX_KEYS && ShortcutRead(path, &s) && s.hotkey) {
-            keys[nKeys] = s.hotkey;
-            lstrcpy(paths[nKeys++], path);
+        } else if (PathIsShortcut(path) && nKeys < MAX_KEYS && (key = ShortcutHotKey(path)) != 0) {
+            if (PathListAdd(&paths, path))
+                keys[nKeys++] = key;
         }
     } while (DosFindNext(&f, &e));
     DosFindClose(&f);
@@ -46,6 +46,7 @@ void ShortcutKeysScan(void)
     char dir[MAX_PATH];
 
     nKeys = 0;
+    PathListFree(&paths);
     DesktopFolder(dir);
     Scan(dir, MAX_DEPTH);
     StartMenuFolder(dir);
@@ -71,8 +72,10 @@ void ShortcutKeysChanged(LPCSTR folder)
 
 void ShortcutKeysRun(int i)
 {
-    if (i >= 0 && i < nKeys)
-        LaunchItem(g_taskbar, paths[i]);
+    char path[MAX_PATH];
+
+    if (i >= 0 && i < nKeys && PathListAt(&paths, i, path))
+        LaunchItem(g_taskbar, path);
 }
 
 /* "Ctrl + Alt + N", as Windows 98 writes a key; "None". */

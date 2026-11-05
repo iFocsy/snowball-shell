@@ -1,6 +1,7 @@
 /*
  * Folder Options as in Windows 98: General, how folders browse (each in
- * the same window, or each in its own as Windows 95 did); View, the
+ * the same window, or each in its own as Windows 95 did); View, every
+ * folder's view like the folder it was opened from or as at first, and the
  * advanced settings that Snowball follows, a list of groups with check
  * boxes and choices (a click or Space changes one). OK or Apply keep them
  * (SNOWBALL.INI [Folders]) and show every window again. File Types is its
@@ -18,6 +19,7 @@ static const struct { LPCSTR text; BYTE kind, depth, value; } rows[] = {
     { "Display the full path in title bar", FO_CHECK, 1, 0 },
     { "Hide file extensions for known file types", FO_CHECK, 1, 1 },
     { "Allow all uppercase names", FO_CHECK, 1, 2 },
+    { "Remember each folder's view settings", FO_CHECK, 1, 4 },
     { "Show pop-up description for folder and desktop items", FO_CHECK, 1, 3 },
     { "Hidden files", FO_GROUP, 1, 0 },
     { "Do not show hidden or system files", FO_RADIO, 2, VIEW_NO_HIDDEN_SYSTEM },
@@ -27,13 +29,14 @@ static const struct { LPCSTR text; BYTE kind, depth, value; } rows[] = {
 #define NROWS   (sizeof rows / sizeof rows[0])
 
 static HWND sheet;
+static HWND current;                       /* the folder's view it was opened from, or NULL */
 static VIEWOPTIONS edited;                 /* what the dialog shows */
 static WNDPROC listProc;
 
 static BOOL *Check(int value)
 {
     return value == 0 ? &edited.fullPath : value == 1 ? &edited.hideExt : value == 2 ? &edited.allUpper
-                                                                      : &edited.infoTips;
+         : value == 3 ? &edited.infoTips : &edited.rememberViews;
 }
 
 static BOOL On(int i)
@@ -97,6 +100,15 @@ static void DrawRow(const DRAWITEMSTRUCT FAR *d)
     SelectObject(d->hDC, old);
 }
 
+/* Like Current Folder or Reset All Folders, once the user agrees. */
+static void Views(HWND dlg, BOOL like)
+{
+    if (MessageBox(dlg, like ? "Do you want all folders to match this folder's view settings the next time you open them?"
+                             : "Do you want all folders to be reset to their original view settings the next time you open them?",
+                   "Folder Views", MB_YESNO | MB_ICONQUESTION) == IDYES)
+        FolderViewsDefault(like && IsWindow(current) ? current : NULL);
+}
+
 static void Apply(HWND dlg)
 {
     g_viewOptions = edited;
@@ -108,7 +120,7 @@ static void Apply(HWND dlg)
 BOOL CALLBACK __export FolderOptionsProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
 {
     HWND list;
-    int i;
+    int i, k;
 
     switch (msg) {
     case WM_INITDIALOG:
@@ -120,10 +132,14 @@ BOOL CALLBACK __export FolderOptionsProc(HWND dlg, UINT msg, WPARAM wp, LPARAM l
         FileTypesPageInit(dlg);
         CheckRadioButton(dlg, IDC_FOLDEROPTIONS_SAME, IDC_FOLDEROPTIONS_OWN,
                          edited.ownWindows ? IDC_FOLDEROPTIONS_OWN : IDC_FOLDEROPTIONS_SAME);
+        CheckRadioButton(dlg, IDC_FOLDEROPTIONS_SINGLE, IDC_FOLDEROPTIONS_DOUBLE,
+                         edited.singleClick ? IDC_FOLDEROPTIONS_SINGLE : IDC_FOLDEROPTIONS_DOUBLE);
         list = GetDlgItem(dlg, IDC_FOLDEROPTIONS_LIST);
         for (i = 0; i < NROWS; i++)
             SendMessage(list, LB_ADDSTRING, 0, (LPARAM)i);
         listProc = (WNDPROC)SetWindowLong(list, GWL_WNDPROC, (LONG)(FARPROC)FolderOptionsListProc);
+        SendDlgItemMessage(dlg, IDC_FOLDEROPTIONS_VIEWICON, STM_SETICON, (WPARAM)IconStock(IDI_FOLDER), 0L);
+        EnableWindow(GetDlgItem(dlg, IDC_FOLDEROPTIONS_LIKE), current != NULL);
         EnableWindow(GetDlgItem(dlg, IDC_APPLY), FALSE);
         SkinDialog(dlg);
         WindowCenter(dlg);
@@ -149,16 +165,27 @@ BOOL CALLBACK __export FolderOptionsProc(HWND dlg, UINT msg, WPARAM wp, LPARAM l
             if (HIWORD(lp) == TCN_SELECT)
                 TabsShowPage(dlg, TabsSelected(GetDlgItem(dlg, IDC_TABS)), NULL);
             break;
+        case IDC_FOLDEROPTIONS_SINGLE:
+        case IDC_FOLDEROPTIONS_DOUBLE:
+            edited.singleClick = wp == IDC_FOLDEROPTIONS_SINGLE;
+            EnableWindow(GetDlgItem(dlg, IDC_APPLY), TRUE);
+            break;
         case IDC_FOLDEROPTIONS_SAME:
         case IDC_FOLDEROPTIONS_OWN:
             edited.ownWindows = wp == IDC_FOLDEROPTIONS_OWN;
             EnableWindow(GetDlgItem(dlg, IDC_APPLY), TRUE);
             break;
+        case IDC_FOLDEROPTIONS_LIKE:
+        case IDC_FOLDEROPTIONS_RESET:
+            Views(dlg, wp == IDC_FOLDEROPTIONS_LIKE);
+            break;
         case IDC_FOLDEROPTIONS_DEFAULTS:            /* the View tab's */
             i = edited.ownWindows;
+            k = edited.singleClick;
             _fmemset(&edited, 0, sizeof edited);
-            edited.ownWindows = i;
-            edited.infoTips = TRUE;
+            edited.ownWindows = i;          /* (the General tab's) */
+            edited.singleClick = k;
+            edited.infoTips = edited.rememberViews = TRUE;
             InvalidateRect(GetDlgItem(dlg, IDC_FOLDEROPTIONS_LIST), NULL, FALSE);
             EnableWindow(GetDlgItem(dlg, IDC_APPLY), TRUE);
             break;
@@ -169,14 +196,17 @@ BOOL CALLBACK __export FolderOptionsProc(HWND dlg, UINT msg, WPARAM wp, LPARAM l
     case WM_DESTROY:
         SetWindowLong(GetDlgItem(dlg, IDC_FOLDEROPTIONS_LIST), GWL_WNDPROC, (LONG)(FARPROC)listProc);
         MessageLoopTrackDialog(dlg, FALSE);
+        FileTypesPageDone();
         sheet = NULL;
         return TRUE;
     }
     return FALSE;
 }
 
-void FolderOptionsShow(void)
+/* view: the folder window's it was opened from (Like Current Folder), or NULL. */
+void FolderOptionsShow(HWND view)
 {
+    current = view && !(GetWindowLong(view, GWL_STYLE) & IVS_DESKTOP) ? view : NULL;
     if (sheet)
         SetActiveWindow(sheet);
     else if (CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_FOLDEROPTS), NULL, FolderOptionsProc) && sheet)

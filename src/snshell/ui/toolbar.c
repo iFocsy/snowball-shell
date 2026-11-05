@@ -27,53 +27,37 @@ typedef struct {
     BOOL   labels;
     int    count, over, down;           /* the button under the mouse, pressed; -1 none */
     BOOL   overArrow, downArrow;
+    int    w, h;                        /* a button's size: measured when buttons, labels or images change */
     BUTTON b[MAX_BUTTONS];
 } TOOLBAR;
 
 #define Bar(w)  ((TOOLBAR *)LocalHeapPointer(GetWindowWord(w, 0)))
 
-static int LabelHeight(void)
+/* Every button is as wide as the widest label needs. */
+static void Measure(TOOLBAR *t)
 {
     HDC dc = GetDC(NULL);
     HFONT old = SelectObject(dc, DrawFont(FALSE));
     TEXTMETRIC tm;
+    int i;
+
     GetTextMetrics(dc, &tm);
+    t->w = t->size + 7;
+    for (i = 0; t->labels && i < t->count; i++)
+        t->w = max(t->w, (int)LOWORD(GetTextExtent(dc, t->b[i].label, lstrlen(t->b[i].label))) + 10);
+    t->h = t->size + 6 + (t->labels ? tm.tmHeight + 2 : 0);
     SelectObject(dc, old);
     ReleaseDC(NULL, dc);
-    return tm.tmHeight;
-}
-
-/* Every button is as wide as the widest label needs. */
-static int ButtonWidth(TOOLBAR *t)
-{
-    HDC dc;
-    HFONT old;
-    int i, w = t->size + 7;
-
-    if (!t->labels)
-        return w;
-    dc = GetDC(NULL);
-    old = SelectObject(dc, DrawFont(FALSE));
-    for (i = 0; i < t->count; i++)
-        w = max(w, (int)LOWORD(GetTextExtent(dc, t->b[i].label, lstrlen(t->b[i].label))) + 10);
-    SelectObject(dc, old);
-    ReleaseDC(NULL, dc);
-    return w;
-}
-
-static int ButtonHeight(TOOLBAR *t)
-{
-    return t->size + 6 + (t->labels ? LabelHeight() + 2 : 0);
 }
 
 /* Button i's rectangle; arrow: the part with the drop-down arrow. */
 static void Place(TOOLBAR *t, int i, RECT *r, RECT *arrow)
 {
-    int k, x = 0, w = ButtonWidth(t);
+    int k, x = 0, w = t->w;
 
     for (k = 0; k < i; k++)
         x += t->b[k].style & TBS_SEPARATOR ? SEP_W : w + (t->b[k].style & TBS_DROPDOWN ? ARROW_W : 0);
-    SetRect(r, x, 0, x + (t->b[i].style & TBS_SEPARATOR ? SEP_W : w), ButtonHeight(t));
+    SetRect(r, x, 0, x + (t->b[i].style & TBS_SEPARATOR ? SEP_W : w), t->h);
     SetRect(arrow, r->right, r->top, t->b[i].style & TBS_DROPDOWN ? r->right + ARROW_W : r->right, r->bottom);
 }
 
@@ -231,12 +215,15 @@ LRESULT CALLBACK __export ToolbarProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     POINT p;
     int i;
 
+    HOOK_DESCRIBE(msg, ToolbarDescribe(w, (LPSTR)lp, wp));
+
     switch (msg) {
     case WM_CREATE:
         if ((t = LocalHeapAlloc(sizeof(TOOLBAR))) == NULL)
             return -1;
         t->over = t->down = -1;
         t->size = 16;
+        Measure(t);
         SetWindowWord(w, 0, LocalHeapOffset(t));
         return 0;
     case WM_DESTROY:
@@ -298,15 +285,8 @@ LRESULT CALLBACK __export ToolbarProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 BOOL ToolbarRegister(void)
 {
-    WNDCLASS wc;
 
-    _fmemset(&wc, 0, sizeof wc);
-    wc.lpfnWndProc = ToolbarProc;
-    wc.cbWndExtra = sizeof(WORD);
-    wc.hInstance = g_hInst;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = TOOLBAR_CLASS;
-    return RegisterClass(&wc);
+    return WindowRegister(TOOLBAR_CLASS, ToolbarProc, 0, sizeof(WORD), NULL, NULL);
 }
 
 void ToolbarSetImages(HWND tb, int strip, int cold, int grey)
@@ -323,6 +303,7 @@ void ToolbarSetImages(HWND tb, int strip, int cold, int grey)
         t->size = bm.bmHeight;
         DeleteObject(b);
     }
+    Measure(t);
     InvalidateRect(tb, NULL, FALSE);
 }
 
@@ -338,6 +319,7 @@ void ToolbarAdd(HWND tb, int image, UINT cmd, LPCSTR label, UINT style)
     b->cmd = cmd;
     b->style = (BYTE)style;
     lstrcpyn(b->label, label ? label : "", sizeof b->label);
+    Measure(t);
     InvalidateRect(tb, NULL, FALSE);
 }
 
@@ -366,12 +348,13 @@ void ToolbarCheck(HWND tb, UINT cmd, BOOL on)
 void ToolbarShowLabels(HWND tb, BOOL on)
 {
     Bar(tb)->labels = on;
+    Measure(Bar(tb));
     InvalidateRect(tb, NULL, FALSE);
 }
 
 int ToolbarHeight(HWND tb)
 {
-    return ButtonHeight(Bar(tb));
+    return Bar(tb)->h;
 }
 
 int ToolbarWidth(HWND tb)
@@ -397,3 +380,19 @@ BOOL ToolbarButtonRect(HWND tb, UINT cmd, RECT *r)
     UnionRect(r, r, &a);
     return TRUE;
 }
+
+#ifdef SNOWBALL_HOOKS
+/* The tests' hooks (src\hooks): button i; FALSE past the last. */
+BOOL ToolbarButton(HWND w, int i, UINT *cmd, LPSTR label, BOOL *off, BOOL *checked)
+{
+    TOOLBAR *t = Bar(w);
+
+    if (!t || i >= t->count)
+        return FALSE;
+    *cmd = t->b[i].cmd;
+    lstrcpy(label, t->b[i].label);
+    *off = t->b[i].off;
+    *checked = t->b[i].checked;
+    return TRUE;
+}
+#endif

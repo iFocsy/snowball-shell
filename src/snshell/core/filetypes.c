@@ -35,15 +35,18 @@ static void Set(LPCSTR key, LPCSTR value)
     RegSetValue(HKCR, key, REG_SZ, value, lstrlen(value));
 }
 
+#define EXT_KEY 16                      /* ".ext": a long name's extension is cut to fit */
+
 static void ExtKey(LPCSTR ext, LPSTR key)
 {
-    wsprintf(key, ".%s", ext);
+    key[0] = '.';
+    lstrcpyn(key + 1, ext, EXT_KEY - 1);
     AnsiLower(key);
 }
 
 BOOL FileTypeClass(LPCSTR ext, LPSTR cls, int size)
 {
-    char key[8];
+    char key[EXT_KEY];
 
     ExtKey(ext, key);
     return *ext && Query(key, cls, size);
@@ -379,7 +382,7 @@ void FileTypeSave(FILETYPE FAR *t)
 
 void FileTypeRemove(const FILETYPE FAR *t)
 {
-    char key[8], keys[48];
+    char key[EXT_KEY], keys[48];
     LPSTR e;
 
     lstrcpy(keys, t->exts);

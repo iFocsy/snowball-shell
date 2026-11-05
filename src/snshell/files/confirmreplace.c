@@ -8,7 +8,7 @@ typedef struct {
 
 static void Describe(HWND w, int id, const DOSENTRY *e)
 {
-    char size[24], date[32], text[80];
+    char size[24], date[DATETIME_SIZE], text[96];
     FormatSize(e->size, size);
     FormatDateTime(e->date, e->time, date);
     wsprintf(text, "%s\nmodified on %s", (LPSTR)size, (LPSTR)date);

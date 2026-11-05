@@ -212,9 +212,12 @@ BOOL SNSYSTEM_API CpuStart(void)
     return TRUE;
 }
 
-/* Restores INT 2Fh only if no one has hooked it since (they would be cut off). */
-void SNSYSTEM_API CpuStop(void)
+/* Restores INT 2Fh only if no one has hooked it since (they would be cut
+   off). Otherwise Hook2F stays in their chain: the library must stay loaded
+   (keep; not from WEP, where it is already going). */
+void CpuEnd(BOOL keep)
 {
+    char me[MAX_PATH];
     WORD sel = 0, ofs = 0;              /* set by the assembly */
 
     if (!started)
@@ -235,8 +238,16 @@ void SNSYSTEM_API CpuStop(void)
             mov dx, word ptr old2F
             int 31h
         }
+    } else if (keep) {
+        GetModuleFileName(g_hInst, me, sizeof me);
+        LoadLibrary(me);
     }
     started = FALSE;
+}
+
+void SNSYSTEM_API CpuStop(void)
+{
+    CpuEnd(TRUE);
 }
 
 DWORD SNSYSTEM_API CpuClock(void)

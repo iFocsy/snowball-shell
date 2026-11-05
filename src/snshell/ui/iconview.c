@@ -76,7 +76,8 @@ void IconViewAdd(HWND iv, LPCSTR name, LPCSTR file, int kind, const DOSENTRY *in
     ITEM far *it;
 
     if (v->count == v->cap) {
-        if (!GlobalGrow(&v->hItems, (void far **)&v->it, (DWORD)(v->cap + GROW) * sizeof(ITEM)))
+        if (v->cap + GROW > MAX_ITEMS ||
+            !GlobalGrow(&v->hItems, (void far **)&v->it, (DWORD)(v->cap + GROW) * sizeof(ITEM)))
             return;
         v->cap += GROW;
     }
@@ -86,6 +87,7 @@ void IconViewAdd(HWND iv, LPCSTR name, LPCSTR file, int kind, const DOSENTRY *in
     it->icon = NULL;
     it->thumb = NULL;
     it->free = 0;
+    it->textW = 0;                      /* measured by IconViewMeasure */
     it->kind = (BYTE)kind;
     it->flags = PathIsShortcut(file) ? IF_SHORTCUT : 0;
     it->size = info ? info->size : 0;
@@ -97,7 +99,7 @@ void IconViewLoadFolder(HWND iv, LPCSTR dir, LPCSTR only)
 {
     char spec[MAX_PATH], name[MAX_PATH];
     DOSFIND f;
-    static DOSENTRY e;
+    DOSENTRY e;
 
     IconViewSetFolder(iv, dir);
     lstrcpy(spec, dir);
@@ -340,21 +342,23 @@ void IconViewSetSel(HWND w, int i, BOOL on)
 static void ScrollTo(HWND w, int i)
 {
     VIEW *v = View(w);
-    RECT r, c;
-    int top;
+    RECT c;
+    long x, y;
+    int cx, cy, top;
 
     if (i < 0 || IconViewIsDesktop(w))
         return;
-    IconViewCellRect(w, i, &r);
+    IconViewCell(w, i, &x, &y, &cx, &cy);
     GetClientRect(w, &c);
     top = v->mode == IVM_DETAILS ? HEAD_H : 0;
     if (v->mode == IVM_LIST) {
-        if (r.left < 0 || r.right > c.right)
-            v->hscroll += r.left < 0 ? r.left - 2 : r.right - c.right;
-    } else if (r.top < top || r.bottom > c.bottom) {
-        v->scroll += r.top < top ? r.top - top - 2 : r.bottom - c.bottom;
+        if (x >= v->hscroll && x + cx - v->hscroll <= c.right)
+            return;
+        v->hscroll = x < v->hscroll ? x - 2 : x + cx - c.right;
     } else {
-        return;
+        if (y - v->scroll >= top && y + cy - v->scroll <= c.bottom)
+            return;
+        v->scroll = y - v->scroll < top ? y - top - 2 : y + cy - c.bottom;
     }
     IconViewLayout(w);
     InvalidateRect(w, NULL, TRUE);
@@ -447,17 +451,17 @@ static LRESULT Create(HWND w)
     v->cap = GROW;
     v->poolCap = 2048;
     v->cellW = SMALL_W;
-    v->hover = -1;
+    v->hover = v->hot = -1;
     if (GetWindowLong(w, GWL_STYLE) & IVS_FOUND) {      /* Find's results */
         static const BYTE keys[] = { IVSORT_NAME, IVSORT_FOLDER, IVSORT_SIZE, IVSORT_TYPE, IVSORT_DATE };
-        static const int widths[] = { 130, 150, 60, 100, 120 };
+        static const int widths[] = { 130, 150, 60, 100, 136 };
         v->ncols = 5;
         _fmemcpy(v->colKey, keys, sizeof keys);
         _fmemcpy(v->colW, widths, sizeof widths);
         v->mode = IVM_DETAILS;
     } else {
         static const BYTE keys[] = { IVSORT_NAME, IVSORT_SIZE, IVSORT_TYPE, IVSORT_DATE };
-        static const int widths[] = { 150, 60, 110, 120 };
+        static const int widths[] = { 150, 60, 110, 136 };
         v->ncols = 4;
         _fmemcpy(v->colKey, keys, sizeof keys);
         _fmemcpy(v->colW, widths, sizeof widths);
@@ -473,6 +477,8 @@ static void Destroy(HWND w)
 {
     VIEW *v = View(w);
 
+    if (!v)                         /* WM_CREATE failed */
+        return;
     IconViewTipOff(w);
     IconViewClear(w, FALSE);        /* the thumbnails' pictures go */
     GlobalUnlock(v->hItems);
@@ -503,8 +509,51 @@ static void Wheel(HWND w, WPARAM key)
         IconViewScroll(w, View(w)->mode == IVM_LIST, code, 0);
 }
 
+/* The mouse's messages. */
+static void Mouse(HWND w, UINT msg, WPARAM wp, LPARAM lp)
+{
+    int x = (int)LOWORD(lp), y = (int)HIWORD(lp);
+
+    switch (msg) {
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+        IconViewButtonDown(w, msg, wp, x, y);
+        break;
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+        IconViewButtonUp(w, msg, wp, x, y);
+        break;
+    case WM_MOUSEMOVE:
+        IconViewMouseMove(w, wp, x, y);
+        break;
+    case WM_LBUTTONDBLCLK:
+        KillTimer(w, TIMER_EDIT);
+        if (IconViewHitTest(w, x, y) >= 0 && !g_viewOptions.singleClick)  /* (the first click opened it) */
+            IconViewNotify(w, IVN_OPEN);
+        break;
+    case WM_MOUSEWHEEL:
+        Wheel(w, (short)HIWORD(wp) > 0 ? VK_UP : VK_DOWN);
+        break;
+    }
+}
+
+/* The keyboard's: the wheel's keys too (ui.h); Alt keys FALSE: as usual. */
+static BOOL Keys(HWND w, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_SYSKEYDOWN)
+        return IconViewSysKey(w, wp, lp);
+    if (msg == WM_CHAR)
+        IconViewTypeSelect(w, wp);
+    else if (IS_WHEEL_KEY(wp, lp))
+        Wheel(w, wp);
+    else
+        IconViewKey(w, wp);
+    return TRUE;
+}
+
 LRESULT CALLBACK __export IconViewProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
+    HOOK_DESCRIBE(msg, IconViewDescribe(w, (LPSTR)lp, wp));
     switch (msg) {
     case WM_CREATE:
         return Create(w);
@@ -531,44 +580,20 @@ LRESULT CALLBACK __export IconViewProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         if (IconViewCursor(w, LOWORD(lp)))
             return TRUE;
         break;
-    case WM_LBUTTONDOWN:
-    case WM_RBUTTONDOWN:
-        IconViewButtonDown(w, msg, wp, (int)LOWORD(lp), (int)HIWORD(lp));
-        return 0;
-    case WM_LBUTTONUP:
-    case WM_RBUTTONUP:
-        IconViewButtonUp(w, msg, wp, (int)LOWORD(lp), (int)HIWORD(lp));
-        return 0;
-    case WM_MOUSEMOVE:
-        IconViewMouseMove(w, wp, (int)LOWORD(lp), (int)HIWORD(lp));
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_LBUTTONUP: case WM_RBUTTONUP:
+    case WM_MOUSEMOVE: case WM_LBUTTONDBLCLK: case WM_MOUSEWHEEL:
+        Mouse(w, msg, wp, lp);
         return 0;
     case WM_CANCELMODE:
         IconViewCancel(w);
         break;
-    case WM_LBUTTONDBLCLK:
-        KillTimer(w, TIMER_EDIT);
-        if (IconViewHitTest(w, (int)LOWORD(lp), (int)HIWORD(lp)) >= 0)
-            IconViewNotify(w, IVN_OPEN);
-        return 0;
     case WM_TIMER:
         IconViewTimer(w, wp);
         return 0;
-    case WM_MOUSEWHEEL:
-        Wheel(w, (short)HIWORD(wp) > 0 ? VK_UP : VK_DOWN);
-        return 0;
-    case WM_KEYDOWN:
-        if (IS_WHEEL_KEY(wp, lp))
-            Wheel(w, wp);
-        else
-            IconViewKey(w, wp);
-        return 0;
-    case WM_SYSKEYDOWN:
-        if (IconViewSysKey(w, wp, lp))
+    case WM_KEYDOWN: case WM_SYSKEYDOWN: case WM_CHAR:
+        if (Keys(w, msg, wp, lp))
             return 0;
         break;
-    case WM_CHAR:
-        IconViewTypeSelect(w, wp);
-        return 0;
     case WM_GETDLGCODE:                 /* in a dialog (Find) too: Enter opens, Tab goes to the parent */
         return DLGC_WANTALLKEYS;
     case WM_VSCROLL:
@@ -583,15 +608,6 @@ LRESULT CALLBACK __export IconViewProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 BOOL IconViewRegister(void)
 {
-    WNDCLASS wc;
 
-    _fmemset(&wc, 0, sizeof wc);
-    wc.style = CS_DBLCLKS;
-    wc.lpfnWndProc = IconViewProc;
-    wc.cbWndExtra = sizeof(WORD);
-    wc.hInstance = g_hInst;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName = ICONVIEW_CLASS;
-    return RegisterClass(&wc);
+    return WindowRegister(ICONVIEW_CLASS, IconViewProc, CS_DBLCLKS, sizeof(WORD), NULL, (HBRUSH)(COLOR_WINDOW + 1));
 }

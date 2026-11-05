@@ -16,26 +16,6 @@ static BOOL InFolder(HWND iv)
     return PathOnDisk(IconViewFolder(iv));
 }
 
-/* Number of selected files and folders (not drives, My Computer, the bin). */
-static int SelFiles(HWND iv)
-{
-    int n = 0, i = -1;
-    while ((i = IconViewNextSelected(iv, i)) >= 0)
-        if (IconViewItemKind(iv, i) <= IVK_FOLDER)
-            n++;
-    return n;
-}
-
-/* The desktop's My Documents among the selected (it stays where it is). */
-static BOOL SelMyDocuments(HWND iv)
-{
-    int i = -1;
-    while ((i = IconViewNextSelected(iv, i)) >= 0)
-        if (DesktopIsMyDocuments(iv, i))
-            return TRUE;
-    return FALSE;
-}
-
 /* Their paths; drives too when asked. */
 static int Selection(HWND iv, PATHLIST *l, BOOL drives)
 {
@@ -83,363 +63,7 @@ static void Changed(PATHLIST *files, LPCSTR dest)
         FileCommandsFolderChanged(dest);
 }
 
-/* ---- menus ---- */
-
-static HMENU NewMenu(void)
-{
-    HMENU m = CreatePopupMenu();
-    AppendMenu(m, MF_STRING, CMD_NEWFOLDER, "&Folder");
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_STRING, CMD_NEWTEXT, "Text Document");
-    return m;
-}
-
-HMENU FileCommandsFileMenu(BOOL bin)
-{
-    HMENU m = CreatePopupMenu();
-
-    if (bin) {
-        AppendMenu(m, MF_STRING, CMD_RESTORE, "R&estore");
-        AppendMenu(m, MF_STRING, CMD_EMPTYBIN, "Empty Recycle &Bin");
-    } else {
-        AppendMenu(m, MF_STRING, CMD_OPEN, "&Open");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_POPUP, (UINT)SendToMenu(), "Se&nd To");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_POPUP, (UINT)NewMenu(), "Ne&w");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_LINK, "Create &Shortcut");
-    }
-    AppendMenu(m, MF_STRING, CMD_DELETE, "&Delete");
-    if (!bin) {
-        AppendMenu(m, MF_STRING, CMD_RENAME, "Rena&me");
-        AppendMenu(m, MF_STRING, CMD_PROPERTIES, "P&roperties");
-    }
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_STRING, CMD_CLOSE, "&Close");
-    return m;
-}
-
-static HMENU ArrangeMenu(void)
-{
-    HMENU m = CreatePopupMenu();
-    AppendMenu(m, MF_STRING, CMD_BYNAME + IVSORT_NAME, "by &Name");
-    AppendMenu(m, MF_STRING, CMD_BYNAME + IVSORT_TYPE, "by &Type");
-    AppendMenu(m, MF_STRING, CMD_BYNAME + IVSORT_SIZE, "by Si&ze");
-    AppendMenu(m, MF_STRING, CMD_BYNAME + IVSORT_DATE, "by &Date");
-    return m;
-}
-
-UINT FileCommandsModeCommand(int mode)
-{
-    return mode == IVM_THUMBS ? CMD_THUMBS : CMD_LARGE + mode;
-}
-
-HMENU FileCommandsModesMenu(HMENU m, int checked)
-{
-    int k;
-
-    AppendMenu(m, MF_STRING, CMD_LARGE + IVM_LARGE, "Lar&ge Icons");
-    AppendMenu(m, MF_STRING, CMD_LARGE + IVM_SMALL, "S&mall Icons");
-    AppendMenu(m, MF_STRING, CMD_LARGE + IVM_LIST, "&List");
-    AppendMenu(m, MF_STRING, CMD_LARGE + IVM_DETAILS, "&Details");
-    AppendMenu(m, MF_STRING, CMD_THUMBS, "T&humbnails");
-    for (k = IVM_LARGE; k <= IVM_THUMBS; k++)
-        CheckMenuItem(m, FileCommandsModeCommand(k), MF_BYCOMMAND | (k == checked ? MF_CHECKED : MF_UNCHECKED));
-    return m;
-}
-
-static HMENU ModesMenu(HMENU m)
-{
-    return FileCommandsModesMenu(m, -1);
-}
-
-HMENU FileCommandsViewMenu(void)
-{
-    HMENU m = ModesMenu(CreatePopupMenu());
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_POPUP, (UINT)ArrangeMenu(), "Arrange &Icons");
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_STRING, CMD_FILTER, "&Filter...");
-    AppendMenu(m, MF_STRING, CMD_REFRESH, "&Refresh\tF5");
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_STRING, CMD_FOLDEROPTS, "Folder &Options...");
-    return m;
-}
-
 /* The desktop and folder windows each remember the view last chosen. */
-static LPCSTR ViewSection(HWND iv)
-{
-    return (GetWindowLong(iv, GWL_STYLE) & IVS_DESKTOP) ? "Desktop" : "Folder";
-}
-
-void FileCommandsLoadView(HWND iv)
-{
-    LPCSTR section = ViewSection(iv);
-    if (!(GetWindowLong(iv, GWL_STYLE) & IVS_DESKTOP))
-        IconViewSetMode(iv, SettingsGetInt(section, "View", IVM_LARGE));
-    IconViewSort(iv, SettingsGetInt(section, "Sort", IVSORT_NAME), SettingsGetInt(section, "Descending", 0));
-}
-
-void FileCommandsSaveView(HWND iv)
-{
-    LPCSTR section = ViewSection(iv);
-    if (!(GetWindowLong(iv, GWL_STYLE) & IVS_DESKTOP))
-        SettingsSetInt(section, "View", IconViewMode(iv));
-    SettingsSetInt(section, "Sort", IconViewSortKey(iv));
-    SettingsSetInt(section, "Descending", IconViewSortDescending(iv));
-}
-
-HMENU FileCommandsEditMenu(void)
-{
-    HMENU m = CreatePopupMenu();
-    AppendMenu(m, MF_STRING, CMD_UNDO, "&Undo\tCtrl+Z");     /* named as it opens */
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_STRING, CMD_CUT, "Cu&t\tCtrl+X");
-    AppendMenu(m, MF_STRING, CMD_COPY, "&Copy\tCtrl+C");
-    AppendMenu(m, MF_STRING, CMD_PASTE, "&Paste\tCtrl+V");
-    AppendMenu(m, MF_STRING, CMD_PASTELINK, "Paste &Shortcut");
-    AppendMenu(m, MF_SEPARATOR, 0, NULL);
-    AppendMenu(m, MF_STRING, CMD_SELECTALL, "Select &All\tCtrl+A");
-    AppendMenu(m, MF_STRING, CMD_INVERT, "&Invert Selection");
-    AppendMenu(m, MF_STRING, CMD_SELECTFILES, "Select &Files...");
-    return m;
-}
-
-BOOL FileCommandsAvailable(HWND iv, UINT cmd)
-{
-    int files = SelFiles(iv), n = IconViewSelectedCount(iv), k = IconViewItemKind(iv, IconViewNextSelected(iv, -1));
-    BOOL bin = InBin(iv);
-
-    if ((cmd == CMD_CUT || cmd == CMD_DELETE || cmd == CMD_RENAME) && SelMyDocuments(iv))
-        return FALSE;
-    switch (cmd) {
-    case CMD_OPEN:      return n > 0 && !bin;
-    case CMD_CUT:
-    case CMD_COPY:
-    case CMD_SENDTO:    return files && !bin;
-    case CMD_PASTE:
-    case CMD_PASTELINK: return InFolder(iv) && ClipboardHasFiles();
-    case CMD_LINK:      return (files || k == IVK_DRIVE) && !bin;
-    case CMD_DELETE:    return files != 0;
-    case CMD_RENAME:    return files == 1 && n == 1 && !bin;
-    case CMD_NEWFOLDER:
-    case CMD_NEWTEXT:   return InFolder(iv);
-    case CMD_SELECTALL:
-    case CMD_INVERT:
-    case CMD_SELECTFILES: return IconViewCount(iv) > 0;
-    case CMD_FILTER:    return InFolder(iv);
-    case CMD_RESTORE:   return files && bin;
-    case CMD_EMPTYBIN:  return !RecycleBinIsEmpty();
-    }
-    return TRUE;
-}
-
-void FileCommandsInitMenu(HMENU m, HWND iv)
-{
-    static const UINT cmds[] = { CMD_OPEN, CMD_CUT, CMD_COPY, CMD_PASTE, CMD_PASTELINK, CMD_LINK, CMD_DELETE,
-                                 CMD_RENAME, CMD_NEWFOLDER, CMD_NEWTEXT, CMD_SELECTALL, CMD_INVERT, CMD_RESTORE,
-                                 CMD_EMPTYBIN };
-    int i, k;
-
-    for (i = 0; i < sizeof cmds / sizeof cmds[0]; i++)
-        EnableMenuItem(m, cmds[i], MF_BYCOMMAND | (FileCommandsAvailable(iv, cmds[i]) ? MF_ENABLED : MF_GRAYED));
-    for (k = IVM_LARGE; k <= IVM_THUMBS; k++)
-        CheckMenuItem(m, FileCommandsModeCommand(k), MF_BYCOMMAND | (k == IconViewMode(iv) ? MF_CHECKED : MF_UNCHECKED));
-    if (GetMenuState(m, CMD_UNDO, MF_BYCOMMAND) != (UINT)-1) {   /* "Undo Delete", or grey */
-        char text[40];
-        BOOL can = UndoMenuText(text);
-        ModifyMenu(m, CMD_UNDO, MF_BYCOMMAND | MF_STRING | (can ? MF_ENABLED : MF_GRAYED), CMD_UNDO, text);
-    }
-    for (k = GetMenuItemCount(m) - 1; k >= 0; k--)
-        if (SendToIsMenu(GetSubMenu(m, k)))
-            EnableMenuItem(m, k, MF_BYPOSITION | (FileCommandsAvailable(iv, CMD_SENDTO) ? MF_ENABLED : MF_GRAYED));
-}
-
-/* The actions of the type of the document a menu was made for. */
-static char actions[FT_ACTIONS][16];
-
-/* "&Print" for "print", as the menu shows an action. */
-static void ActionLabel(LPCSTR action, LPSTR out)
-{
-    wsprintf(out, "&%s", action);
-    out[1] = (char)(DWORD)AnsiUpper((LPSTR)(DWORD)(BYTE)out[1]);
-}
-
-/* Open, named as the type's default action, then its other actions and
-   Open With for a document (path: the item the menu is for); Open alone
-   for anything else. */
-static void OpenItems(HMENU m, int k, LPCSTR path)
-{
-    char label[20], ext[8];
-    int n = 0, i;
-
-    if (k == IVK_FILE && path && !PathIsProgram(path) && !PathIsShortcut(path) && !PathIsDeskLink(path)) {
-        lstrcpyn(ext, *PathExtension((LPSTR)path) ? PathExtension((LPSTR)path) + 1 : "", sizeof ext);
-        n = FileTypeActions(ext, actions, FT_ACTIONS);
-        ActionLabel(n ? actions[0] : "open", label);
-        AppendMenu(m, MF_STRING, CMD_OPEN, label);
-        for (i = 1; i < n; i++) {
-            ActionLabel(actions[i], label);
-            AppendMenu(m, MF_STRING, CMD_ACTION + i, label);
-        }
-        if (QuickViewCan(path))
-            AppendMenu(m, MF_STRING, CMD_QUICKVIEW, "Quick &View");
-        AppendMenu(m, MF_STRING, CMD_OPENWITH, "Open Wit&h...");
-    } else {
-        AppendMenu(m, MF_STRING, CMD_OPEN, "&Open");
-    }
-}
-
-/* The right-click menu of items of one kind (IVK_*), path the first. */
-static void ItemsMenu(HMENU m, int k, LPCSTR path)
-{
-    OpenItems(m, k, path);
-    if (k >= IVK_FOLDER && k <= IVK_COMPUTER)
-        AppendMenu(m, MF_STRING, CMD_EXPLORE, "&Explore");
-    if (k == IVK_FOLDER || k == IVK_DRIVE)
-        AppendMenu(m, MF_STRING, CMD_FIND, "Fi&nd...");
-    if (k == IVK_BIN) {
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_EMPTYBIN, "Empty Recycle &Bin");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_PROPERTIES, "P&roperties");
-    } else if (k == IVK_DRIVE) {
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_LINK, "Create &Shortcut");
-    } else if (k != IVK_COMPUTER) {
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_POPUP, (UINT)SendToMenu(), "Se&nd To");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_CUT, "Cu&t");
-        AppendMenu(m, MF_STRING, CMD_COPY, "&Copy");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_LINK, "Create &Shortcut");
-        AppendMenu(m, MF_STRING, CMD_DELETE, "&Delete");
-        AppendMenu(m, MF_STRING, CMD_RENAME, "Rena&me");
-    }
-    if (k != IVK_BIN) {
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_PROPERTIES, "P&roperties");
-    }
-}
-
-void FileCommandsContextMenu(HWND owner, HWND iv)
-{
-    HMENU m = CreatePopupMenu();
-    int n = IconViewSelectedCount(iv), k = IconViewItemKind(iv, IconViewNextSelected(iv, -1));
-    char path[MAX_PATH];
-    POINT p;
-
-    if (n && InBin(iv)) {
-        AppendMenu(m, MF_STRING, CMD_RESTORE, "R&estore");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_DELETE, "&Delete");
-    } else if (n) {
-        ItemsMenu(m, k, IconViewItemPath(iv, IconViewNextSelected(iv, -1), path) ? path : NULL);
-    } else {
-        if (!(GetWindowLong(iv, GWL_STYLE) & IVS_DESKTOP))
-            AppendMenu(m, MF_POPUP, (UINT)ModesMenu(CreatePopupMenu()), "&View");
-        AppendMenu(m, MF_POPUP, (UINT)ArrangeMenu(), "Arrange &Icons");
-        AppendMenu(m, MF_SEPARATOR, 0, NULL);
-        AppendMenu(m, MF_STRING, CMD_REFRESH, "R&efresh");
-        if (InBin(iv)) {
-            AppendMenu(m, MF_SEPARATOR, 0, NULL);
-            AppendMenu(m, MF_STRING, CMD_EMPTYBIN, "Empty Recycle &Bin");
-        }
-        if (InFolder(iv)) {
-            char undo[40];
-            AppendMenu(m, MF_SEPARATOR, 0, NULL);
-            AppendMenu(m, MF_STRING, CMD_PASTE, "&Paste");
-            AppendMenu(m, MF_STRING, CMD_PASTELINK, "Paste &Shortcut");
-            if (UndoMenuText(undo)) {           /* "Undo Delete", as Windows 98's, when there is one */
-                *_fstrchr(undo, '\t') = '\0';
-                AppendMenu(m, MF_STRING, CMD_UNDO, undo);
-            }
-            AppendMenu(m, MF_SEPARATOR, 0, NULL);
-            AppendMenu(m, MF_POPUP, (UINT)NewMenu(), "Ne&w");
-        }
-        if (!InBin(iv)) {
-            AppendMenu(m, MF_SEPARATOR, 0, NULL);
-            AppendMenu(m, MF_STRING, CMD_PROPERTIES, "P&roperties");
-        }
-    }
-    FileCommandsInitMenu(m, iv);
-    if (!IconViewMenuPoint(iv, &p))      /* a key asked: at the item; else at the pointer */
-        GetCursorPos(&p);
-    TrackPopupMenu(m, TPM_LEFTALIGN | TPM_RIGHTBUTTON, p.x, p.y, 0, owner, NULL);
-    DestroyMenu(m);
-}
-
-/* The same menu for one file or folder outside the views (an item of the
-   Start menu), its command done here; Rename asks in a dialog. Sort by
-   Name, if offered, is the caller's to do. */
-static int itemKind = -1;               /* FileCommandsKindMenu's; else the path says */
-
-UINT FileCommandsItemMenu(HWND owner, LPCSTR path, BOOL sortable, LPSTR renamed)
-{
-    char dir[MAX_PATH], name[MAX_PATH];
-    HMENU m = CreatePopupMenu();
-    int k = itemKind >= 0 ? itemKind : PathIsFolder(path) ? IVK_FOLDER : IVK_FILE, done = 0;
-    UINT cmd;
-    PATHLIST l;
-
-    ItemsMenu(m, k, path);
-    if (sortable)                       /* after Rename */
-        InsertMenu(m, GetMenuItemCount(m) - 2, MF_BYPOSITION | MF_STRING, CMD_BYNAME + IVSORT_NAME, "Sort &by Name");
-    cmd = PopupMenuTrack(m, owner);
-    DestroyMenu(m);
-    *renamed = '\0';
-    lstrcpy(dir, path);
-    PathToParent(dir);
-    PathListInit(&l);
-    PathListAdd(&l, path);
-    switch (cmd) {
-    case CMD_OPEN:
-        if (k == IVK_COMPUTER || k == IVK_BIN)
-            FolderWindowOpen(path);
-        else
-            LaunchItem(owner, path);
-        break;
-    case CMD_EMPTYBIN:   RecycleBinEmptyAll(owner); break;
-    case CMD_OPENWITH:   OpenWithDialogShow(owner, path); break;
-    case CMD_QUICKVIEW:  QuickViewShow(path); break;
-    case CMD_EXPLORE:    FolderWindowExplore(path); break;
-    case CMD_FIND:       FindShow(path); break;
-    case CMD_CUT:
-    case CMD_COPY:       ClipboardPut(owner, &l, cmd == CMD_CUT); break;
-    case CMD_DELETE:     FileCommandsDelete(owner, &l, GetKeyState(VK_SHIFT) < 0); break;
-    case CMD_PROPERTIES:
-        if (k == IVK_BIN)
-            RecycleBinPropertiesShow(owner);
-        else
-            PropertiesShow(owner, &l, k);
-        break;
-    case CMD_LINK:
-        ShortcutCreate(path, dir, FALSE);
-        FileCommandsFolderChanged(dir);
-        break;
-    case CMD_RENAME:
-        if (k == IVK_FOLDER)
-            DisplayNameOfFolder(PathFileName((LPSTR)path), name);
-        else
-            DisplayNameOfFile(PathFileName((LPSTR)path), name);
-        while (PromptDialogShow(owner, "Rename", "&New name:", name, sizeof name) &&
-               (done = FileCommandsRename(owner, path, name, renamed)) == 0)
-            ;                                   /* an error: the name can be corrected */
-        if (done <= 0)
-            *renamed = '\0';
-        break;
-    default:
-        if (cmd >= CMD_SENDTO && cmd < CMD_SENDTO + MAX_SENDTO)
-            SendToRun(owner, &l, cmd);
-        else if (cmd > CMD_ACTION && cmd < CMD_ACTION + FT_ACTIONS)
-            LaunchAction(owner, path, actions[cmd - CMD_ACTION]);
-    }
-    PathListFree(&l);
-    return cmd;
-}
-
 /* ---- commands ---- */
 
 /* Asks as Windows 98 does, then sends to the Recycle Bin or deletes. */
@@ -475,7 +99,7 @@ static void Delete(HWND owner, HWND iv, BOOL purge)
 {
     PATHLIST l;
 
-    if (!FileCommandsAvailable(iv, CMD_DELETE))
+    if (!FileMenusAvailable(iv, CMD_DELETE))
         return;
     if (Selection(iv, &l, FALSE)) {
         if (InBin(iv))
@@ -697,7 +321,7 @@ static BOOL FileCommand(HWND owner, HWND iv, UINT cmd)
         Delete(owner, iv, GetKeyState(VK_SHIFT) < 0);
         break;
     case CMD_RENAME:
-        if (IconViewSelectedCount(iv) == 1 && SelFiles(iv) == 1 && !InBin(iv))
+        if (FileMenusAvailable(iv, CMD_RENAME))
             IconViewEditLabel(iv, IconViewNextSelected(iv, -1));
         break;
     case CMD_NEWFOLDER:
@@ -731,6 +355,21 @@ static BOOL ItemCommand(HWND owner, HWND iv, UINT cmd)
     int k;
 
     switch (cmd) {
+    case CMD_DOSHERE:                   /* in the folder or drive selected, else the one shown */
+        k = IconViewItemKind(iv, IconViewNextSelected(iv, -1));
+        if (!((k == IVK_FOLDER || k == IVK_DRIVE) && IconViewItemPath(iv, IconViewNextSelected(iv, -1), dir)))
+            lstrcpy(dir, IconViewFolder(iv));
+        LaunchDosPrompt(owner, dir, NULL, "MS-DOS Prompt");
+        break;
+    case CMD_FORMAT:
+    case CMD_COPYDISK:
+        if (!IconViewItemPath(iv, IconViewNextSelected(iv, -1), dir))
+            break;
+        if (cmd == CMD_FORMAT)
+            FormatDialogShow(owner, (dir[0] | 0x20) - 'a');
+        else
+            FormatDialogCopyDisk(owner, (dir[0] | 0x20) - 'a');
+        break;
     case CMD_FIND:                      /* in the folder selected, else the one shown */
         k = IconViewItemKind(iv, IconViewNextSelected(iv, -1));
         if ((k == IVK_FOLDER || k == IVK_DRIVE) && IconViewItemPath(iv, IconViewNextSelected(iv, -1), dir))
@@ -746,6 +385,10 @@ static BOOL ItemCommand(HWND owner, HWND iv, UINT cmd)
         if (IconViewItemPath(iv, IconViewNextSelected(iv, -1), dir))
             QuickViewShow(dir);
         break;
+    case CMD_PIN:
+        if (IconViewItemPath(iv, IconViewNextSelected(iv, -1), dir))
+            FrequentPin(dir, !FrequentIsPinned(dir));
+        break;
     case CMD_EXPLORE:
         if (IconViewItemKind(iv, IconViewNextSelected(iv, -1)) == IVK_COMPUTER)
             FolderWindowExplore("");
@@ -760,7 +403,7 @@ static BOOL ItemCommand(HWND owner, HWND iv, UINT cmd)
         } else if (cmd > CMD_ACTION && cmd < CMD_ACTION + FT_ACTIONS) {     /* each file selected */
             if (Selection(iv, &l, FALSE)) {
                 for (p = PathListLock(&l); *p; p = PathListNext(p))
-                    LaunchAction(owner, p, actions[cmd - CMD_ACTION]);
+                    LaunchAction(owner, p, FileMenusAction(cmd));
                 PathListUnlock(&l);
             }
             PathListFree(&l);
@@ -782,7 +425,7 @@ static BOOL ViewCommand(HWND owner, HWND iv, UINT cmd)
         SendMessage(owner, SBM_CHANGED, 0, (LPARAM)(LPSTR)dir);
         break;
     case CMD_FOLDEROPTS:
-        FolderOptionsShow();
+        FolderOptionsShow(iv);
         break;
     default:
         if (cmd >= CMD_LARGE && cmd <= CMD_DETAILS)
@@ -793,7 +436,7 @@ static BOOL ViewCommand(HWND owner, HWND iv, UINT cmd)
             IconViewSort(iv, cmd - CMD_BYNAME, FALSE);
         else
             return FALSE;
-        FileCommandsSaveView(iv);
+        FolderViewsSave(iv);
     }
     return TRUE;
 }
@@ -876,7 +519,7 @@ int FileCommandsDropEffect(LPCSTR target, int kind, PATHLIST *files, BOOL ctrl, 
         PathToParent(parent);
         here = here && !lstrcmpi(parent, target);
         drives = drives || lstrlen(p) <= 3;
-        programs = programs && LaunchIsProgram(p) && !PathIsShortcut(p);
+        programs = programs && !PathIsShortcut(p) && LaunchIsProgram(p);    /* (no shortcut read) */
     }
     inside = *p != '\0';
     PathListUnlock(files);
@@ -945,14 +588,3 @@ void FileCommandsDropFiles(HWND iv, HDROP drop)
     PathListFree(&l);
 }
 
-/* The same for an item of a kind its path does not tell (the tree's My
-   Computer, Recycle Bin, a drive): IVK_*. */
-UINT FileCommandsKindMenu(HWND owner, LPCSTR path, int kind, LPSTR renamed)
-{
-    UINT cmd;
-
-    itemKind = kind;
-    cmd = FileCommandsItemMenu(owner, path, FALSE, renamed);
-    itemKind = -1;
-    return cmd;
-}

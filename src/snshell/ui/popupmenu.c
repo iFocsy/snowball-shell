@@ -14,6 +14,7 @@ static UINT chosen;
 
 LRESULT CALLBACK __export PopupMenuProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
+    HOOK_DESCRIBE_MENU(msg, PopupMenuDescribeMenu(wp, lp));
     switch (msg) {
     case WM_COMMAND:
         chosen = wp;
@@ -30,16 +31,11 @@ LRESULT CALLBACK __export PopupMenuProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 UINT PopupMenuTrack(HMENU m, HWND w)
 {
-    WNDCLASS wc;
     POINT p;
     MSG msg;
 
     if (!keeper) {
-        _fmemset(&wc, 0, sizeof wc);
-        wc.lpfnWndProc = PopupMenuProc;
-        wc.hInstance = g_hInst;
-        wc.lpszClassName = POPUPMENU_CLASS;
-        RegisterClass(&wc);
+        WindowRegister(POPUPMENU_CLASS, PopupMenuProc, 0, 0, NULL, NULL);
         if ((keeper = CreateWindow(POPUPMENU_CLASS, "", WS_POPUP, 0, 0, 0, 0, NULL, NULL, g_hInst, NULL)) == NULL)
             return 0;
     }
@@ -51,3 +47,10 @@ UINT PopupMenuTrack(HMENU m, HWND w)
         chosen = msg.wParam;
     return chosen;
 }
+
+#ifdef SNOWBALL_HOOKS
+HWND PopupMenuOwner(void)               /* the tests' hooks (src\hooks) */
+{
+    return owner;
+}
+#endif

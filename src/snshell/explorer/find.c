@@ -24,27 +24,6 @@ static RECT animRect;
 
 /* ---- matching ---- */
 
-/* name against one pattern with * and ?, case ignored. */
-static BOOL Match(LPCSTR name, LPCSTR pat)
-{
-    for (; *pat; pat++, name++) {
-        if (*pat == '*') {
-            while (*pat == '*')
-                pat++;
-            if (!*pat)
-                return TRUE;
-            for (; *name; name++)
-                if (Match(name, pat))
-                    return TRUE;
-            return FALSE;
-        }
-        if (!*name || (*pat != '?' &&
-            (BYTE)(DWORD)AnsiLower((LPSTR)(DWORD)(BYTE)*pat) != (BYTE)(DWORD)AnsiLower((LPSTR)(DWORD)(BYTE)*name)))
-            return FALSE;
-    }
-    return !*name;
-}
-
 /* Any of the patterns in Named; one without wildcards matches inside names. */
 static BOOL NameMatches(LPCSTR name)
 {
@@ -68,7 +47,7 @@ static BOOL NameMatches(LPCSTR name)
             pat[0] = '*';
             lstrcat(pat, "*");
         }
-        if (Match(name, pat))
+        if (PathMatchesPattern(name, pat))
             return TRUE;
     }
     return FALSE;
@@ -231,39 +210,115 @@ static void OpenSelected(void)
             LaunchItem(finder, path);
 }
 
-BOOL CALLBACK __export FindProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+static void Init(HWND dlg)
+{
+    char root[4];
+    RECT r;
+    int d;
+
+    finder = dlg;
+    SkinDialog(dlg);
+    TabsAdd(GetDlgItem(dlg, IDC_TABS), "Name & Location");
+    SetRect(&r, 0, 104, 0, 0);
+    MapDialogRect(dlg, &r);
+    resultsTop = r.top;
+    SetRect(&animRect, 236, 66, 294, 98);
+    MapDialogRect(dlg, &animRect);
+    results = CreateWindow(ICONVIEW_CLASS, NULL, WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | WS_BORDER | IVS_FOUND,
+                           0, 0, 0, 0, dlg, (HMENU)ID_RESULTS, g_hInst, NULL);
+    IconViewSetFolder(results, "");
+    for (d = 2; d < 26; d++)
+        if (GetDriveType(d)) {
+            wsprintf(root, "%c:\\", 'A' + d);
+            SendDlgItemMessage(dlg, IDC_FIND_LOOKIN, CB_ADDSTRING, 0, (LPARAM)(LPSTR)root);
+        }
+    SetDlgItemText(dlg, IDC_FIND_LOOKIN, start);
+    CheckDlgButton(dlg, IDC_FIND_SUBFOLDERS, TRUE);
+    EnableWindow(GetDlgItem(dlg, IDC_FIND_STOP), FALSE);
+    Arrange(dlg);
+    SetFocus(GetDlgItem(dlg, IDC_FIND_NAMED));
+}
+
+static void Paint(HWND dlg)
 {
     static const int whole = 0;         /* the status bar's one panel */
     PAINTSTRUCT ps;
     RECT r;
     HFONT old;
-    LPCSTR panel;
-    char root[4];
-    int d;
+    LPCSTR panel = status;
 
+    BeginPaint(dlg, &ps);
+    GetClientRect(dlg, &r);
+    old = SelectObject(ps.hdc, DrawFont(FALSE));
+    SetBkMode(ps.hdc, TRANSPARENT);
+    PaintStatusBar(ps.hdc, &r, 1, &whole, &panel, NULL, !IsZoomed(dlg));
+    SelectObject(ps.hdc, old);
+    PaintAnimation(ps.hdc);
+    EndPaint(dlg, &ps);
+}
+
+/* The results' notifications: opening, menus, drags, renaming (its answer returned). */
+static void ResultsNotify(HWND dlg, UINT code)
+{
+    switch (code) {
+    case IVN_OPEN:    OpenSelected(); break;
+    case IVN_CONTEXT: FileMenusContext(dlg, results); break;
+    case IVN_DRAG:
+    case IVN_RDRAG:   DragDropRun(results, code == IVN_RDRAG); break;
+    case IVN_RENAME:  SetWindowLong(dlg, DWL_MSGRESULT, FileCommandsRenamed(dlg, results)); break;
+    }
+}
+
+/* New Search: the fields and the results emptied. */
+static void NewSearch(HWND dlg)
+{
+    stop = TRUE;
+    SetDlgItemText(dlg, IDC_FIND_NAMED, "");
+    SetDlgItemText(dlg, IDC_FIND_TEXT, "");
+    if (!searching) {
+        IconViewClear(results, FALSE);
+        IconViewFinish(results);
+        status[0] = '\0';
+        ShowStatus();
+    }
+    SetFocus(GetDlgItem(dlg, IDC_FIND_NAMED));
+}
+
+/* FALSE: not handled (the dialog manager's). */
+static BOOL Command(HWND dlg, WPARAM wp, LPARAM lp)
+{
+    switch (wp) {
+    case IDC_FIND_FIND:
+        if (!searching)
+            Search();
+        return TRUE;
+    case IDC_FIND_STOP:
+        stop = TRUE;
+        return TRUE;
+    case IDC_FIND_NEW:
+        NewSearch(dlg);
+        return TRUE;
+    case IDCANCEL:
+        PostMessage(dlg, WM_CLOSE, 0, 0L);
+        return TRUE;
+    case ID_RESULTS:
+        ResultsNotify(dlg, HIWORD(lp));
+        return TRUE;
+    case CMD_OPEN:
+        OpenSelected();
+        return TRUE;
+    }
+    if ((wp >= CMD_OPEN && wp <= CMD_FIND) || wp == CMD_OPENWITH || wp == CMD_QUICKVIEW ||
+        (wp > CMD_ACTION && wp < CMD_ACTION + FT_ACTIONS))     /* menus of the results */
+        FileCommandsRun(dlg, results, wp);
+    return FALSE;
+}
+
+BOOL CALLBACK __export FindProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
     switch (msg) {
     case WM_INITDIALOG:
-        finder = dlg;
-        SkinDialog(dlg);
-        TabsAdd(GetDlgItem(dlg, IDC_TABS), "Name & Location");
-        SetRect(&r, 0, 104, 0, 0);
-        MapDialogRect(dlg, &r);
-        resultsTop = r.top;
-        SetRect(&animRect, 236, 66, 294, 98);
-        MapDialogRect(dlg, &animRect);
-        results = CreateWindow(ICONVIEW_CLASS, NULL, WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | WS_BORDER | IVS_FOUND,
-                               0, 0, 0, 0, dlg, (HMENU)ID_RESULTS, g_hInst, NULL);
-        IconViewSetFolder(results, "");
-        for (d = 2; d < 26; d++)
-            if (GetDriveType(d)) {
-                wsprintf(root, "%c:\\", 'A' + d);
-                SendDlgItemMessage(dlg, IDC_FIND_LOOKIN, CB_ADDSTRING, 0, (LPARAM)(LPSTR)root);
-            }
-        SetDlgItemText(dlg, IDC_FIND_LOOKIN, start);
-        CheckDlgButton(dlg, IDC_FIND_SUBFOLDERS, TRUE);
-        EnableWindow(GetDlgItem(dlg, IDC_FIND_STOP), FALSE);
-        Arrange(dlg);
-        SetFocus(GetDlgItem(dlg, IDC_FIND_NAMED));
+        Init(dlg);
         return FALSE;                   /* the focus is set */
     case WM_SIZE:
         if (results)
@@ -279,15 +334,7 @@ BOOL CALLBACK __export FindProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         ((MINMAXINFO FAR *)lp)->ptMinTrackSize.y = 260;
         return TRUE;
     case WM_PAINT:
-        BeginPaint(dlg, &ps);
-        GetClientRect(dlg, &r);
-        old = SelectObject(ps.hdc, DrawFont(FALSE));
-        SetBkMode(ps.hdc, TRANSPARENT);
-        panel = status;
-        PaintStatusBar(ps.hdc, &r, 1, &whole, &panel, NULL, !IsZoomed(dlg));
-        SelectObject(ps.hdc, old);
-        PaintAnimation(ps.hdc);
-        EndPaint(dlg, &ps);
+        Paint(dlg);
         return TRUE;
     case WM_TIMER:
         frame++;
@@ -300,47 +347,7 @@ BOOL CALLBACK __export FindProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
             FileCommandsKey(dlg, results, wp);
         return TRUE;
     case WM_COMMAND:
-        switch (wp) {
-        case IDC_FIND_FIND:
-            if (!searching)
-                Search();
-            return TRUE;
-        case IDC_FIND_STOP:
-            stop = TRUE;
-            return TRUE;
-        case IDC_FIND_NEW:
-            stop = TRUE;
-            SetDlgItemText(dlg, IDC_FIND_NAMED, "");
-            SetDlgItemText(dlg, IDC_FIND_TEXT, "");
-            if (!searching) {
-                IconViewClear(results, FALSE);
-                IconViewFinish(results);
-                status[0] = '\0';
-                ShowStatus();
-            }
-            SetFocus(GetDlgItem(dlg, IDC_FIND_NAMED));
-            return TRUE;
-        case IDCANCEL:
-            PostMessage(dlg, WM_CLOSE, 0, 0L);
-            return TRUE;
-        case ID_RESULTS:
-            switch (HIWORD(lp)) {
-            case IVN_OPEN:    OpenSelected(); break;
-            case IVN_CONTEXT: FileCommandsContextMenu(dlg, results); break;
-            case IVN_DRAG:
-            case IVN_RDRAG:   DragDropRun(results, HIWORD(lp) == IVN_RDRAG); break;
-            case IVN_RENAME:  SetWindowLong(dlg, DWL_MSGRESULT, FileCommandsRenamed(dlg, results)); break;
-            }
-            return TRUE;
-        case CMD_OPEN:
-            OpenSelected();
-            return TRUE;
-        default:
-            if ((wp >= CMD_OPEN && wp <= CMD_FIND) || wp == CMD_OPENWITH || wp == CMD_QUICKVIEW ||
-                (wp > CMD_ACTION && wp < CMD_ACTION + FT_ACTIONS))     /* menus of the results */
-                FileCommandsRun(dlg, results, wp);
-        }
-        break;
+        return Command(dlg, wp, lp);
     case WM_CLOSE:
         if (searching) {                /* the search ends first, then the window */
             stop = closing = TRUE;

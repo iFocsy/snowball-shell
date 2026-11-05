@@ -1,6 +1,6 @@
 /*
  * Text on the clipboard shared with the computer DOSBox-X runs on, through
- * DOSBox-X's CLIP$ device (w311.conf [dos] "dos clipboard device enable =
+ * DOSBox-X's CLIP$ device ([dos] "dos clipboard device enable =
  * true"): reading the device gives the host's text, writing it sets the
  * host's. Windows' clipboard is watched as a clipboard viewer; the host's
  * is read every second. Without the device (another emulator, a real
@@ -161,17 +161,12 @@ LRESULT CALLBACK __export HostClipboardProc(HWND w, UINT msg, WPARAM wp, LPARAM 
    clipboard, empty then, does not go over it. */
 void HostClipboardStart(void)
 {
-    WNDCLASS wc;
     HFILE f;
 
     if (watcher || !SettingsGetInt("Clipboard", "ShareWithHost", 1) || (f = Device(OF_READ)) == HFILE_ERROR)
         return;
     _lclose(f);
-    _fmemset(&wc, 0, sizeof wc);
-    wc.lpfnWndProc = HostClipboardProc;
-    wc.hInstance = g_hInst;
-    wc.lpszClassName = CLASS;
-    RegisterClass(&wc);
+    WindowRegister(CLASS, HostClipboardProc, 0, 0, NULL, NULL);
     if ((watcher = CreateWindow(CLASS, "", WS_POPUP, 0, 0, 0, 0, NULL, NULL, g_hInst, NULL)) == NULL)
         return;
     setting = TRUE;                     /* a new viewer is told of the clipboard at once */

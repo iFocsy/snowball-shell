@@ -7,6 +7,7 @@
 #define FOP_MOVE        1
 #define FOP_DELETE      2               /* to the Recycle Bin where the drive has one */
 #define FOP_PURGE       3               /* for good */
+#define FOP_WALLPAPER   4               /* only ProgressOpen's: a picture made into the wallpaper */
 BOOL FileOperationRun(HWND owner, int op, PATHLIST *files, LPCSTR destDir);
 BOOL FileOperationBusy(void);
 void FileOperationError(HWND owner, LPCSTR verb, LPCSTR path, WORD code);  /* "Cannot copy X: ..." */
@@ -35,6 +36,11 @@ void RecycleBinRestore(HWND owner, PATHLIST *stored);
 void RecycleBinPurge(HWND owner, PATHLIST *stored);   /* delete for good, with confirmation */
 void RecycleBinEmptyAll(HWND owner);
 void RecycleBinTrim(HWND owner);
+DWORD RecycleBinDrive(HWND owner, int drive, BOOL empty);  /* its bytes; emptied, unasked (Disk Cleanup) */
+
+/* ---- diskcleanup.c: Disk Cleanup, the low disk space warning ---- */
+void DiskCleanupShow(HWND owner, int drive);      /* 0 A:; -1 Windows' */
+void DiskCleanupCheck(HWND owner);                /* TIMER_SCAN: warns of a disk nearly full */
 
 /* ---- undo.c: Edit > Undo, the last file operations ---- */
 #define UNDO_RENAME     1

@@ -112,7 +112,7 @@ static void Count(WORD attr, DWORD size)
    fresh: dst is in a folder this operation just made, so it is free. */
 static BOOL MayWrite(const DOSENTRY *from, BOOL fresh)
 {
-    static DOSENTRY there;
+    DOSENTRY there;
     int answer;
 
     if (fresh || !DosGetEntry(dst, &there))
@@ -331,7 +331,7 @@ void FileOperationTotals(LPCSTR path, DWORD *bytes, WORD *files, WORD *folders)
 
 static void OneItem(LPCSTR path, LPCSTR destDir)
 {
-    static DOSENTRY e;
+    DOSENTRY e;
     char parent[MAX_PATH];
 
     lstrcpy(src, path);
@@ -376,7 +376,7 @@ static void OneItem(LPCSTR path, LPCSTR destDir)
 BOOL FileOperationRun(HWND w, int what, PATHLIST *files, LPCSTR destDir)
 {
     LPSTR list, p;
-    static DOSENTRY e;
+    DOSENTRY e;
 
     if (busy || !files->count) {
         MessageBeep(0);

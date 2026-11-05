@@ -6,8 +6,9 @@
  *               for Ctrl+Esc); Windows 98's colours and its menu and dialog
  *               font as the system font (SBSANS8.FON, made from this
  *               Windows' own fonts); more time for Windows programs beside
- *               busy DOS boxes; LFN.DRV if wanted (asked). Each value
- *               replaced is kept in UNINSTAL.INI, as install.ps1 keeps them
+ *               busy DOS boxes; the drivers chosen in its dialog (LFN.DRV,
+ *               USERX.DRV, GDIX.DRV). Each value
+ *               replaced is kept in UNINSTAL.INI
  *               ([SYSTEM.INI] boot|shell=progman.exe).
  *   /uninstall  puts back each value still as Snowball set it.
  *   /remove     the Start menu's Uninstall Snowball: the uninstaller, or,
@@ -19,6 +20,7 @@
 #include <string.h>
 #include "snowball.h"
 #include "dpmi.h"
+#include "sbsetup.h"
 
 #define TITLE       "Snowball Setup"
 #define SAVED       "UNINSTAL.INI"
@@ -39,6 +41,7 @@ static const char *Colors[][2] = {
 };
 #define NCOLORS     (sizeof Colors / sizeof Colors[0])
 
+static HINSTANCE instance;
 static char app[MAX_PATH], saved[MAX_PATH], shell[MAX_PATH], scheme[200];
 static CHANGE changes[8 + NCOLORS];
 static int nChanges;
@@ -51,8 +54,10 @@ static void Add(const char *file, const char *section, const char *key, const ch
     changes[nChanges++].value = value;
 }
 
-/* The values Snowball sets; fonts.fon only when its font could be made. */
-static void Changes(BOOL font)
+/* The values Snowball sets; fonts.fon only when its font could be made,
+   the colours only when colors (Snowball is not the shell yet: an update
+   keeps the colours chosen). */
+static void Changes(BOOL font, BOOL colors)
 {
     char rgb[16], *p;
     int i, r, g, b;
@@ -64,7 +69,8 @@ static void Changes(BOOL font)
         Add("SYSTEM.INI", "boot", "fonts.fon", "sbsans8.fon");
     Add("SYSTEM.INI", "386Enh", "WinTimeSlice", "200,50");
     Add("CONTROL.INI", "color schemes", "Windows 98", scheme);
-    Add("CONTROL.INI", "current", "color schemes", "Windows 98");
+    if (colors)
+        Add("CONTROL.INI", "current", "color schemes", "Windows 98");
     scheme[0] = '\0';
     for (i = 0; i < NCOLORS; i++) {     /* CONTROL.INI keeps a scheme as BBGGRR hex */
         lstrcpy(rgb, Colors[i][1]);
@@ -72,7 +78,8 @@ static void Changes(BOOL font)
         g = atoi(p = strchr(rgb, ' ') + 1);
         b = atoi(strchr(p, ' ') + 1);
         wsprintf(scheme + lstrlen(scheme), "%s%lX", (LPSTR)(i ? "," : ""), (DWORD)b * 65536L + (DWORD)g * 256 + r);
-        Add("WIN.INI", "colors", Colors[i][0], Colors[i][1]);
+        if (colors)
+            Add("WIN.INI", "colors", Colors[i][0], Colors[i][1]);
     }
 }
 
@@ -325,46 +332,100 @@ static BOOL CopyFile(LPCSTR from, LPCSTR to)
     return ok && n != (UINT)HFILE_ERROR;
 }
 
-/* LFN.DRV (Setup leaves it in Snowball's folder), if wanted: in WINDOWS\SYSTEM,
-   loaded at startup. Loaded already (an earlier install): only its new
-   version. Otherwise asked, Yes first when DOS has long file names. Its
-   code stays in memory, so the file may be replaced while it runs. */
-static void InstallLfn(LPCSTR sys)
-{
-    char value[256], from[MAX_PATH], to[MAX_PATH], question[600];
-    BOOL dosHas;
+/* The drivers Setup offers: it leaves them in Snowball's folder, and the
+   ones chosen go to WINDOWS\SYSTEM, loaded at startup. One loaded already
+   (an earlier install) starts chosen and gets its new version: its code
+   stays in memory, so the file may be replaced while it runs. One no longer
+   chosen goes. */
+typedef struct {
+    const char *file, *added;           /* its name; in UNINSTAL.INI, that Setup added it */
+    int control;
+    BOOL offered, loaded, chosen;
+} PART;
 
-    lstrcpy(from, app);
-    lstrcat(from, "LFN.DRV");
-    lstrcpy(to, sys);
-    PathAppend(to, "LFN.DRV");
-    if (!Exists(from))
-        return;
+static PART parts[] = {
+    { "lfn.drv", "AddedLfn", IDC_LFN },
+    { "userx.drv", "AddedUserX", IDC_USERX },
+    { "gdix.drv", "AddedGdiX", IDC_GDIX },
+};
+#define PARTS       ((int)(sizeof parts / sizeof parts[0]))
+#define PART_LFN    0
+
+BOOL FAR PASCAL __export ComponentsProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    RECT r;
+    int i;
+
+    switch (msg) {
+    case WM_INITDIALOG:
+        GetWindowRect(dlg, &r);
+        SetWindowPos(dlg, NULL, (GetSystemMetrics(SM_CXSCREEN) - (r.right - r.left)) / 2,
+                     (GetSystemMetrics(SM_CYSCREEN) - (r.bottom - r.top)) / 2, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        CheckDlgButton(dlg, IDC_SHELLPART, 1);
+        for (i = 0; i < PARTS; i++) {
+            CheckDlgButton(dlg, parts[i].control, parts[i].chosen);
+            EnableWindow(GetDlgItem(dlg, parts[i].control), parts[i].offered);
+        }
+        return TRUE;
+    case WM_COMMAND:
+        if (wParam == IDOK || wParam == IDCANCEL) {
+            for (i = 0; i < PARTS; i++)
+                parts[i].chosen = IsDlgButtonChecked(dlg, parts[i].control) != 0;
+            EndDialog(dlg, 0);
+            return TRUE;
+        }
+        break;
+    }
+    return FALSE;
+}
+
+static void InstallParts(LPCSTR sys)
+{
+    char value[256], from[MAX_PATH], to[MAX_PATH], text[100];
+    FARPROC proc;
+    OFSTRUCT of;
+    int i;
+
     if (!Get("SYSTEM.INI", "boot", "drivers", value, sizeof value))
         value[0] = '\0';
-    if (DriversHave(value, "lfn.drv")) {
-        CopyFile(from, to);
-        return;
+    for (i = 0; i < PARTS; i++) {
+        PART *p = parts + i;
+        lstrcpy(from, app);
+        lstrcat(from, p->file);
+        p->offered = Exists(from);
+        p->chosen = p->loaded = DriversHave(value, p->file);
     }
-    dosHas = DosHasLongNames();
-    lstrcpy(question, "Install LFN.DRV, long file names for Windows programs?\n\n"
-            "With it, Windows programs can use the long file names DOS has (DOSBox-X with lfn=true, or a "
-            "DOS long file name driver), and older programs can open files in long-named folders. It loads "
-            "when Windows starts.");
-    if (!dosHas)
-        lstrcat(question, "\n\nThis DOS has no long file names now: LFN.DRV does nothing until it has them.");
-    if (MessageBox(NULL, question, TITLE, MB_YESNO | MB_ICONQUESTION | (dosHas ? MB_DEFBUTTON1 : MB_DEFBUTTON2)) != IDYES)
-        return;
-    if (!CopyFile(from, to)) {
-        MessageBox(NULL, "LFN.DRV could not be copied to Windows' SYSTEM folder.", TITLE, MB_OK | MB_ICONSTOP);
-        return;
+    if (DosHasLongNames() && parts[PART_LFN].offered)
+        parts[PART_LFN].chosen = TRUE;
+    proc = MakeProcInstance((FARPROC)ComponentsProc, instance);
+    DialogBox(instance, MAKEINTRESOURCE(IDD_COMPONENTS), NULL, (DLGPROC)proc);
+    FreeProcInstance(proc);
+
+    for (i = 0; i < PARTS; i++) {
+        PART *p = parts + i;
+        if (!p->offered)
+            continue;
+        lstrcpy(from, app);
+        lstrcat(from, p->file);
+        lstrcpy(to, sys);
+        PathAppend(to, p->file);
+        if (p->chosen && !CopyFile(from, to)) {
+            wsprintf(text, "%s could not be copied to Windows' SYSTEM folder.", (LPSTR)p->file);
+            MessageBox(NULL, text, TITLE, MB_OK | MB_ICONSTOP);
+        } else if (p->chosen && !p->loaded) {
+            if (value[0])
+                lstrcat(value, " ");
+            lstrcat(value, p->file);
+            WritePrivateProfileString("Snowball", p->added, "1", saved);
+        } else if (!p->chosen && p->loaded) {
+            DriversRemove(value, p->file);
+            WritePrivateProfileString("Snowball", p->added, NULL, saved);
+            OpenFile(to, &of, OF_DELETE);
+        }
     }
-    if (value[0])
-        lstrcat(value, " ");
-    lstrcat(value, "lfn.drv");
-    Set("SYSTEM.INI", "boot", "drivers", value);
-    WritePrivateProfileString("Snowball", "AddedLfn", "1", saved);
-    if (!Get("SYSTEM.INI", "lfn.drv", "LongPaths", value, sizeof value)) {
+    Set("SYSTEM.INI", "boot", "drivers", value[0] ? (LPCSTR)value : NULL);
+    if (parts[PART_LFN].chosen && !parts[PART_LFN].loaded &&
+        !Get("SYSTEM.INI", "lfn.drv", "LongPaths", value, sizeof value)) {
         Set("SYSTEM.INI", "lfn.drv", "LongPaths", "1");     /* long paths for old programs too */
         WritePrivateProfileString("Snowball", "AddedLongPaths", "1", saved);
     }
@@ -377,7 +438,9 @@ static void Install(void)
     int i;
 
     GetSystemDirectory(sys, sizeof sys);
-    Changes(MakeFont(sys));
+    if (!Get("SYSTEM.INI", "boot", "shell", value, sizeof value))
+        value[0] = '\0';
+    Changes(MakeFont(sys), lstrcmpi(value, shell) != 0);      /* (Snowball the shell already: an update) */
 
     /* each original kept once: a reinstall must not overwrite them */
     for (i = 0; i < nChanges; i++) {
@@ -390,7 +453,7 @@ static void Install(void)
     for (i = 0; i < nChanges; i++)
         Set(changes[i].file, changes[i].section, changes[i].key, changes[i].value);
 
-    InstallLfn(sys);
+    InstallParts(sys);
     lstrcpy(path, sys);                 /* an old version's library */
     PathAppend(path, "SNOWSYS.DLL");
     OpenFile(path, &of, OF_DELETE);
@@ -405,7 +468,7 @@ static void Uninstall(void)
     OFSTRUCT of;
     int i;
 
-    Changes(TRUE);
+    Changes(TRUE, TRUE);
     for (i = 0; i < nChanges; i++) {
         CHANGE *c = changes + i;
         wsprintf(key, "%s|%s", (LPSTR)c->section, (LPSTR)c->key);
@@ -415,15 +478,16 @@ static void Uninstall(void)
             GetPrivateProfileString(c->file, key, "", before, sizeof before, saved) ? (LPCSTR)before : NULL);
         WritePrivateProfileString(c->file, key, NULL, saved);
     }
-    if (GetPrivateProfileInt("Snowball", "AddedLfn", 0, saved)) {
-        if (Get("SYSTEM.INI", "boot", "drivers", value, sizeof value)) {
-            DriversRemove(value, "lfn.drv");
-            Set("SYSTEM.INI", "boot", "drivers", value[0] ? (LPCSTR)value : NULL);
+    for (i = 0; i < PARTS; i++)
+        if (GetPrivateProfileInt("Snowball", parts[i].added, 0, saved)) {
+            if (Get("SYSTEM.INI", "boot", "drivers", value, sizeof value)) {
+                DriversRemove(value, parts[i].file);
+                Set("SYSTEM.INI", "boot", "drivers", value[0] ? (LPCSTR)value : NULL);
+            }
+            GetSystemDirectory(before, sizeof before);     /* the copy Install made; its code is in memory */
+            PathAppend(before, parts[i].file);
+            OpenFile(before, &of, OF_DELETE);
         }
-        GetSystemDirectory(before, sizeof before);     /* the copy Install made; its code is in memory */
-        PathAppend(before, "LFN.DRV");
-        OpenFile(before, &of, OF_DELETE);
-    }
     if (GetPrivateProfileInt("Snowball", "AddedLongPaths", 0, saved))
         WritePrivateProfileString("lfn.drv", "LongPaths", NULL, "SYSTEM.INI");
     WritePrivateProfileString("Snowball", NULL, NULL, saved);
@@ -470,6 +534,7 @@ static void Remove(void)
 
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int show)
 {
+    instance = hInst;
     GetModuleFileName(hInst, app, sizeof app);
     *(strrchr(app, '\\') + 1) = '\0';   /* Snowball's folder, with its '\' */
     lstrcpy(saved, app);

@@ -2,22 +2,43 @@
 #include "snsystem.h"
 
 #define MAX_IMAGES  112
+#define MAX_STRIPS  16
+#define STRIP_BYTES 8192                /* a strip's colours, about */
 
 static HFONT fonts[2];
 
 /* Images of icons at 16 or 32 pixels: colour (black where transparent) and
-   mask (1 where transparent). Fixed ones came from the shell's resources;
-   the others are shrunk copies of programs' icons, which a program may
-   free: its handle can come back as another icon's, so the copy remembers
-   what the icon held. */
+   mask (1 where transparent), each in a slot of a strip of one size: a pair
+   of bitmaps holds many (GDI's heap has room for few bitmaps). Fixed ones
+   came from the shell's resources; the others are shrunk copies of
+   programs' icons, which a program may free: its handle can come back as
+   another icon's, so the copy remembers what the icon held. */
+typedef struct {
+    HBITMAP color, mask;
+    BYTE    size, slots;
+    DWORD   taken;                      /* a bit for each slot */
+} STRIP;
+static STRIP strips[MAX_STRIPS];
+static int nStrips;
+
 typedef struct {
     HICON   icon;
     BYTE    size, fixed;
     WORD    print;                      /* Fingerprint of a shrunk copy's icon */
-    HBITMAP color, mask;
+    BYTE    strip, slot;
 } IMAGE;
 static IMAGE images[MAX_IMAGES];
 static int nImages;
+static HDC memDC;
+
+/* A memory DC kept for drawing from bitmaps (one for every icon drawn,
+   making one each time is slow): select one in, and the old one back. */
+HDC SNSYSTEM_API DrawMemoryDC(void)
+{
+    if (!memDC)
+        memDC = CreateCompatibleDC(NULL);
+    return memDC;
+}
 
 /* MS Sans Serif 8, the Windows 98 UI font; created once, never bold by accident. */
 HFONT SNSYSTEM_API DrawFont(BOOL bold)
@@ -39,19 +60,39 @@ void SNSYSTEM_API DrawSolidRect(HDC dc, const RECT FAR *r, COLORREF c)
     SetBkColor(dc, old);
 }
 
-/* At most 32 solid bands. Channels are rounded to multiples of 8 so greys stay
-   neutral in 15/16-bit colour (5 or 6 bits per channel). */
+/* The screen's bits per pixel (Windows 3.1 keeps them until it restarts). */
+int SNSYSTEM_API DrawScreenDepth(void)
+{
+    static int depth;
+
+    if (!depth) {
+        HDC screen = GetDC(NULL);
+        depth = GetDeviceCaps(screen, BITSPIXEL) * GetDeviceCaps(screen, PLANES);
+        ReleaseDC(NULL, screen);
+    }
+    return depth;
+}
+
+/* Solid bands, at most 64 and 4 pixels wide at least. As Windows 98, from's
+   colour only with 256 colours or fewer (the nearest solid colours would
+   show as stripes). Channels are rounded to multiples of 8 in 15/16-bit
+   colour (5 or 6 bits each), so greys stay neutral. */
 void SNSYSTEM_API DrawGradient(HDC dc, const RECT FAR *r, COLORREF from, COLORREF to, BOOL vertical)
 {
     int len = vertical ? r->bottom - r->top : r->right - r->left;
-    int bands = len < 32 ? len : 32, last = bands > 1 ? bands - 1 : 1, i;
+    int bands = max(1, min(len / 4, 64)), last = bands > 1 ? bands - 1 : 1, i;
+    BYTE round = DrawScreenDepth() > 16 ? 0xFF : 0xF8;
     RECT b = *r;
 
+    if (DrawScreenDepth() <= 8) {
+        DrawSolidRect(dc, r, from);
+        return;
+    }
     for (i = 0; i < bands; i++) {
         int a = MulDiv(len, i, bands), e = MulDiv(len, i + 1, bands);
-        COLORREF c = RGB((GetRValue(from) + MulDiv(GetRValue(to) - GetRValue(from), i, last)) & 0xF8,
-                         (GetGValue(from) + MulDiv(GetGValue(to) - GetGValue(from), i, last)) & 0xF8,
-                         (GetBValue(from) + MulDiv(GetBValue(to) - GetBValue(from), i, last)) & 0xF8);
+        COLORREF c = RGB((GetRValue(from) + MulDiv(GetRValue(to) - GetRValue(from), i, last)) & round,
+                         (GetGValue(from) + MulDiv(GetGValue(to) - GetGValue(from), i, last)) & round,
+                         (GetBValue(from) + MulDiv(GetBValue(to) - GetBValue(from), i, last)) & round);
         if (vertical) { b.top = r->top + a; b.bottom = r->top + e; }
         else          { b.left = r->left + a; b.right = r->left + e; }
         DrawSolidRect(dc, &b, c);
@@ -68,11 +109,31 @@ void SNSYSTEM_API DrawFrame(HDC dc, const RECT FAR *r, COLORREF tl, COLORREF br)
     SetRect(&e, r->right - 1, r->top, r->right, r->bottom);          DrawSolidRect(dc, &e, br);
 }
 
+/* The colours edges and buttons are drawn in: Windows', or a scheme's while
+   Display Properties' picture of it paints (by COLOR_* and SC_*; NULL: Windows'). */
+static const COLORREF FAR *previewSys, FAR *previewSc;
+
+void SNSYSTEM_API DrawPreviewColors(const COLORREF FAR *sys, const COLORREF FAR *sc)
+{
+    previewSys = sys;
+    previewSc = sc;
+}
+
+COLORREF DrawSysColor(int index)
+{
+    return previewSys ? previewSys[index] : GetSysColor(index);
+}
+
+COLORREF DrawSkinColor(int sc)
+{
+    return previewSc ? previewSc[sc] : SkinColor(sc);
+}
+
 /* Windows 98 two-pixel edge: raised (buttons, frames) or sunken (fields). */
 void SNSYSTEM_API DrawBevel(HDC dc, const RECT FAR *r, BOOL sunken)
 {
-    COLORREF light = GetSysColor(COLOR_BTNHIGHLIGHT), face = GetSysColor(COLOR_BTNFACE);
-    COLORREF shadow = GetSysColor(COLOR_BTNSHADOW), dark = RGB(0, 0, 0);
+    COLORREF light = DrawSysColor(COLOR_BTNHIGHLIGHT), face = DrawSysColor(COLOR_BTNFACE);
+    COLORREF shadow = DrawSysColor(COLOR_BTNSHADOW), dark = DrawSkinColor(SC_DKSHADOW);
     RECT in = *r;
 
     InflateRect(&in, -1, -1);
@@ -155,10 +216,15 @@ void SNSYSTEM_API DrawOffscreenEnd(OFFSCREEN FAR *o)
 }
 
 /* Windows 3.1 has no PaintDesktop: the desktop window paints its pattern
-   and wallpaper into our DC (for windows placed at the screen origin). */
+   and wallpaper into our DC (for windows placed at the screen origin).
+   Its procedure is called, not sent to: the desktop window belongs to the
+   active task, and what is sent to a task that is ending is lost, which
+   left an off-screen bitmap as it came, whatever was in that memory. */
 void SNSYSTEM_API DrawWallpaper(HDC dc)
 {
-    SendMessage(GetDesktopWindow(), WM_ERASEBKGND, (WPARAM)dc, 0L);
+    HWND desktop = GetDesktopWindow();
+
+    CallWindowProc((FARPROC)GetWindowLong(desktop, GWL_WNDPROC), desktop, WM_ERASEBKGND, (WPARAM)dc, 0L);
 }
 
 /* ---- icons ----
@@ -182,6 +248,12 @@ static WORD Fingerprint(HICON icon)
     return sum;
 }
 
+static void Release(IMAGE *im)
+{
+    strips[im->strip].taken &= ~(1L << im->slot);
+    im->icon = NULL;
+}
+
 static IMAGE *Find(HICON icon, int size)
 {
     int i;
@@ -189,9 +261,7 @@ static IMAGE *Find(HICON icon, int size)
     for (i = 0; i < nImages; i++)
         if (images[i].icon == icon && images[i].size == size) {
             if (!images[i].fixed && images[i].print != Fingerprint(icon)) {
-                DeleteObject(images[i].color);      /* another icon now: shrunk again */
-                DeleteObject(images[i].mask);
-                images[i].icon = NULL;
+                Release(&images[i]);            /* another icon now: shrunk again */
                 return NULL;
             }
             return &images[i];
@@ -199,8 +269,51 @@ static IMAGE *Find(HICON icon, int size)
     return NULL;
 }
 
+/* A free slot for an image of that size, in a new strip if need be: as
+   many as STRIP_BYTES hold at the screen's colours. FALSE: none. */
+static BOOL Slot(int size, BYTE *strip, BYTE *slot)
+{
+    HDC screen;
+    STRIP *s;
+    int i, k, n;
+
+    for (i = 0; i < nStrips; i++)
+        for (k = 0; k < strips[i].slots; k++)
+            if (strips[i].size == size && !(strips[i].taken & (1L << k))) {
+                *strip = (BYTE)i;
+                *slot = (BYTE)k;
+                return TRUE;
+            }
+    if (nStrips == MAX_STRIPS)
+        return FALSE;
+    s = &strips[nStrips];
+    n = (int)(STRIP_BYTES / max(1L, (long)size * size * DrawScreenDepth() / 8));
+    s->slots = (BYTE)max(4, min(n, 32));
+    screen = GetDC(NULL);
+    s->color = CreateCompatibleBitmap(screen, size * s->slots, size);
+    ReleaseDC(NULL, screen);
+    s->mask = CreateBitmap(size * s->slots, size, 1, 1, NULL);
+    if (!s->color || !s->mask) {
+        if (s->color)
+            DeleteObject(s->color);
+        if (s->mask)
+            DeleteObject(s->mask);
+        return FALSE;
+    }
+    s->size = (BYTE)size;
+    s->taken = 0;
+    *strip = (BYTE)nStrips++;
+    *slot = 0;
+    return TRUE;
+}
+
+/* The image's bitmaps (then deleted) into a slot. */
 static IMAGE *Keep(HICON icon, int size, HBITMAP color, HBITMAP mask, BOOL fixed)
 {
+    HDC from = CreateCompatibleDC(NULL), to = DrawMemoryDC();
+    HBITMAP old1, old2;
+    IMAGE *im = NULL;
+    BYTE strip, slot;
     int i;
 
     for (i = 0; i < nImages && images[i].icon; i++)     /* a place left by a stale copy, */
@@ -208,23 +321,48 @@ static IMAGE *Keep(HICON icon, int size, HBITMAP color, HBITMAP mask, BOOL fixed
     if (i == MAX_IMAGES) {              /* else, full: the newest shrunk copy makes room */
         for (i = MAX_IMAGES - 1; i >= 0 && images[i].fixed; i--)
             ;
-        if (i < 0) {
-            DeleteObject(color);
-            DeleteObject(mask);
-            return NULL;
-        }
-        DeleteObject(images[i].color);
-        DeleteObject(images[i].mask);
-    } else if (i == nImages) {          /* else, at the end */
-        nImages++;
+        if (i >= 0)
+            Release(&images[i]);
     }
-    images[i].icon = icon;
-    images[i].size = (BYTE)size;
-    images[i].fixed = (BYTE)fixed;
-    images[i].print = fixed ? 0 : Fingerprint(icon);
-    images[i].color = color;
-    images[i].mask = mask;
-    return &images[i];
+    if (i >= 0 && from && to && Slot(size, &strip, &slot)) {
+        old1 = SelectObject(from, color);
+        old2 = SelectObject(to, strips[strip].color);
+        BitBlt(to, slot * size, 0, size, size, from, 0, 0, SRCCOPY);
+        SelectObject(from, mask);
+        SelectObject(to, strips[strip].mask);
+        BitBlt(to, slot * size, 0, size, size, from, 0, 0, SRCCOPY);
+        SelectObject(from, old1);
+        SelectObject(to, old2);
+        strips[strip].taken |= 1L << slot;
+        if (i == nImages)               /* (else a place left) */
+            nImages++;
+        im = &images[i];
+        im->icon = icon;
+        im->size = (BYTE)size;
+        im->fixed = (BYTE)fixed;
+        im->print = fixed ? 0 : Fingerprint(icon);
+        im->strip = strip;
+        im->slot = slot;
+    }
+    if (from)
+        DeleteDC(from);
+    DeleteObject(color);
+    DeleteObject(mask);
+    return im;
+}
+
+/* The library unloads: its images and DC go. */
+void DrawFree(void)
+{
+    while (nStrips) {
+        nStrips--;
+        DeleteObject(strips[nStrips].color);
+        DeleteObject(strips[nStrips].mask);
+    }
+    nImages = 0;
+    if (memDC)
+        DeleteDC(memDC);
+    memDC = NULL;
 }
 
 /* An icon resource's DIB (its height counts the colours and the mask) as
@@ -298,12 +436,10 @@ static BOOL ResourceImage(HINSTANCE module, LPCSTR group, int size, int depth, H
 
 BOOL SNSYSTEM_API DrawIconImages(HICON icon, HINSTANCE module, LPCSTR group)
 {
-    HDC screen = GetDC(NULL);
-    int depth = GetDeviceCaps(screen, BITSPIXEL) * GetDeviceCaps(screen, PLANES);
+    int depth = DrawScreenDepth();
     HBITMAP color, mask;
     BOOL ok = FALSE;
 
-    ReleaseDC(NULL, screen);
     if (!Find(icon, 16) && ResourceImage(module, group, 16, depth, &color, &mask))
         ok = Keep(icon, 16, color, mask, TRUE) != NULL;
     /* Windows 3.1 may take the 16 colour 32x32: ours has 256 if the screen does */
@@ -391,9 +527,10 @@ static IMAGE *Shrink(HICON icon)
 void SNSYSTEM_API DrawIconImage(HDC dc, int x, int y, HICON icon, BOOL small)
 {
     IMAGE *im = Find(icon, small ? 16 : 32);
-    static HDC mem;                     /* one for every icon drawn: making one each time is slow */
+    HDC mem = DrawMemoryDC();
     COLORREF bk, fg;
     HBITMAP old;
+    int sx;
 
     if (!im && small && (im = Shrink(icon)) == NULL)
         return;                         /* no memory: better nothing than a 32x32 */
@@ -402,16 +539,73 @@ void SNSYSTEM_API DrawIconImage(HDC dc, int x, int y, HICON icon, BOOL small)
     if (!im) {
         DrawIcon(dc, x, y, icon);
     } else {
-        if (!mem && (mem = CreateCompatibleDC(NULL)) == NULL) {
+        if (!mem) {
             DrawIcon(dc, x, y, icon);
         } else {
-            old = SelectObject(mem, im->mask);
-            BitBlt(dc, x, y, im->size, im->size, mem, 0, 0, SRCAND);
-            SelectObject(mem, im->color);
-            BitBlt(dc, x, y, im->size, im->size, mem, 0, 0, SRCPAINT);
+            sx = im->slot * im->size;
+            old = SelectObject(mem, strips[im->strip].mask);
+            BitBlt(dc, x, y, im->size, im->size, mem, sx, 0, SRCAND);
+            SelectObject(mem, strips[im->strip].color);
+            BitBlt(dc, x, y, im->size, im->size, mem, sx, 0, SRCPAINT);
             SelectObject(mem, old);
         }
     }
     SetBkColor(dc, bk);
     SetTextColor(dc, fg);
+}
+
+static BOOL animate = TRUE;
+
+void SNSYSTEM_API DrawSetAnimations(BOOL on)
+{
+    animate = on;
+}
+
+BOOL SNSYSTEM_API DrawAnimations(void)
+{
+    return animate;
+}
+
+/* A step of an animation: ticks of CpuClock (1193182 Hz); none without it. */
+void SNSYSTEM_API DrawWait(DWORD ticks)
+{
+    DWORD t;
+
+    for (t = CpuClock(); t && CpuClock() - t < ticks; )
+        ;
+}
+
+static void Outline(HDC dc, const RECT *r)
+{
+    int w = r->right - r->left, h = r->bottom - r->top;
+
+    PatBlt(dc, r->left, r->top, w, 2, DSTINVERT);
+    PatBlt(dc, r->left, r->bottom - 2, w, 2, DSTINVERT);
+    PatBlt(dc, r->left, r->top + 2, 2, h - 4, DSTINVERT);
+    PatBlt(dc, r->right - 2, r->top + 2, 2, h - 4, DSTINVERT);
+}
+
+/* Windows 95's zoom: an outline going from one rectangle of the screen to
+   the other in about 0.1 s (8 steps of CpuClock's 12.5 ms; without it,
+   as fast as they draw), each taken back by drawing it again. */
+#define ZOOM_STEPS  8
+#define ZOOM_TICKS  14915L
+void SNSYSTEM_API DrawZoom(const RECT FAR *from, const RECT FAR *to)
+{
+    HDC dc;
+    RECT r;
+    int i;
+
+    if (!animate || IsRectEmpty(from) || IsRectEmpty(to) || (dc = GetDC(NULL)) == NULL)
+        return;
+    for (i = 1; i <= ZOOM_STEPS; i++) {
+        r.left = from->left + MulDiv(to->left - from->left, i, ZOOM_STEPS + 1);
+        r.top = from->top + MulDiv(to->top - from->top, i, ZOOM_STEPS + 1);
+        r.right = from->right + MulDiv(to->right - from->right, i, ZOOM_STEPS + 1);
+        r.bottom = from->bottom + MulDiv(to->bottom - from->bottom, i, ZOOM_STEPS + 1);
+        Outline(dc, &r);
+        DrawWait(ZOOM_TICKS);
+        Outline(dc, &r);
+    }
+    ReleaseDC(NULL, dc);
 }

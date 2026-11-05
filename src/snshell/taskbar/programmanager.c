@@ -1,41 +1,37 @@
 /*
- * Program Manager's part, played by the Start menu. On first run its groups
- * (PROGMAN.INI + binary .GRP files) become Start Menu\Programs folders with
- * one shortcut per item; setup programs that still talk to "PROGMAN"
- * through DDE (CreateGroup, AddItem...) get their groups made the same way.
+ * Program Manager's part, played by the Start menu: setup programs that still
+ * talk to "PROGMAN" through DDE (CreateGroup, AddItem...) get their groups as
+ * Start Menu\Programs folders with one shortcut per item, as programgroups.c
+ * makes them of the .GRP files.
  */
 #include "internal.h"
 #include <dde.h>
 #include <stdlib.h>
 
-static SHORTCUT s;                     /* large: one for the module */
-
-#define GRP_ITEMS   34          /* offset of the item table in the header */
-#define TAG_DIR     0x8101
-#define TAG_MIN     0x8103
 #define DDE_NAME    "PROGMAN"   /* the service and its topic */
 #define DATA_MAX    16384       /* the longest answer to a request */
 #define MAX_ARGS    9           /* AddItem's */
 
-static void ProgramsDir(LPSTR out)
+void ProgramManagerFolder(LPSTR out)
 {
     StartMenuFolder(out);
     PathAppend(out, "Programs");
 }
 
 /* dir\title+ext as a file name: long names keep the title (minus characters
-   DOS forbids), 8.3 names use its first letters. Unique: "Title (2)"... if
-   taken; otherwise the same title always gives the same name, so Program
-   Manager's names find their groups and items again. */
-static void ItemName(LPCSTR dir, LPCSTR title, LPCSTR ext, BOOL unique, LPSTR out)
+   DOS forbids), 8.3 names use its first letters. nth 1, 2...: the title's
+   name, then "Title (2)"..., taken or not, so the same title and nth always
+   give the same name and Program Manager's names find their groups and items
+   again; nth 0: the first of those not taken. Long or 8.3 as asked. */
+void ProgramManagerItemNameAs(LPCSTR dir, LPCSTR title, LPCSTR ext, int nth, BOOL longNames, LPSTR out)
 {
     char base[64], name[80];
     int i, n = 0, tries;
 
-    for (i = 0; title[i] && n < (DosHasLongNames() ? 60 : 8); i++) {
+    for (i = 0; title[i] && n < (longNames ? 60 : 8); i++) {
         char c = title[i];
-        if (DosHasLongNames() ? (c >= ' ' && !_fstrchr("\\/:*?\"<>|", c) && (n || c != ' '))
-                          : IsCharAlphaNumeric(c))
+        if (longNames ? (c >= ' ' && !_fstrchr("\\/:*?\"<>|", c) && (n || c != ' '))
+                      : IsCharAlphaNumeric(c))
             base[n++] = c;
     }
     while (n && (base[n - 1] == ' ' || base[n - 1] == '.'))
@@ -43,26 +39,34 @@ static void ItemName(LPCSTR dir, LPCSTR title, LPCSTR ext, BOOL unique, LPSTR ou
     base[n] = '\0';
     if (!n)
         lstrcpy(base, "ITEM");
-    for (tries = 1; tries < 100; tries++) {
+    for (tries = nth ? min(nth, 99) : 1; tries < 100; tries++) {
         if (tries == 1)
             wsprintf(name, "%s%s", (LPSTR)base, ext);
-        else if (DosHasLongNames())
+        else if (longNames)
             wsprintf(name, "%s (%d)%s", (LPSTR)base, tries, ext);
         else
             wsprintf(name, "%.6s%02d%s", (LPSTR)base, tries, ext);
         lstrcpy(out, dir);
         PathAppend(out, name);
-        if (!unique || DosGetAttributes(out) == 0xFFFF)
+        if (nth || DosGetAttributes(out) == 0xFFFF)
             return;
     }
 }
 
-/* A Program Manager item as a shortcut in dir; no title: the program's name. */
-static BOOL WriteItem(LPCSTR dir, LPCSTR title, LPCSTR cmd, LPCSTR workDir,
-                      LPCSTR icon, int iconIndex, BOOL minimized, BOOL unique)
+/* ... as names are made now. */
+void ProgramManagerItemName(LPCSTR dir, LPCSTR title, LPCSTR ext, int nth, LPSTR out)
+{
+    ProgramManagerItemNameAs(dir, title, ext, nth, DosHasLongNames(), out);
+}
+
+/* A Program Manager item as a shortcut in dir, named as ProgramManagerItemName's
+   nth; no title: the program's name. */
+BOOL ProgramManagerWriteItem(LPCSTR dir, LPCSTR title, LPCSTR cmd, LPCSTR workDir,
+                             LPCSTR icon, int iconIndex, BOOL minimized, int nth)
 {
     char shc[MAX_PATH], prog[MAX_PATH];
     OFSTRUCT of;
+    SHORTCUT s;
 
     _fmemset(&s, 0, sizeof s);
     LaunchSplitCommand(cmd, prog, s.args, sizeof s.args);
@@ -81,7 +85,7 @@ static BOOL WriteItem(LPCSTR dir, LPCSTR title, LPCSTR cmd, LPCSTR workDir,
         title = PathFileName(prog);
         *PathExtension(prog) = '\0';
     }
-    ItemName(dir, title, SHC_EXT, unique, shc);
+    ProgramManagerItemName(dir, title, SHC_EXT, nth, shc);
     return ShortcutWrite(shc, &s);
 }
 
@@ -89,122 +93,7 @@ static BOOL WriteItem(LPCSTR dir, LPCSTR title, LPCSTR cmd, LPCSTR workDir,
    own if title is taken. */
 BOOL ProgramManagerAddItem(LPCSTR dir, LPCSTR title, LPCSTR cmd)
 {
-    return WriteItem(dir, title, cmd, "", "", 0, FALSE, TRUE);
-}
-
-/* ---- first run: the .GRP files ---- */
-
-static WORD Word(BYTE far *p) { return *(WORD far *)p; }
-
-static void ConvertItem(LPCSTR dir, BYTE far *grp, WORD size, WORD item, int index)
-{
-    BYTE far *it = grp + item;
-    char workDir[MAX_PATH];
-    BOOL minimized = FALSE;
-    WORD tag;
-
-    /* tagged data after the group: working directory, run minimized */
-    *workDir = '\0';
-    for (tag = Word(grp + 4 + 2); tag + 6 <= size; ) {   /* cbGroup */
-        WORD id = Word(grp + tag), forItem = Word(grp + tag + 2), cb = Word(grp + tag + 4);
-        if (id == 0xFFFF || cb < 6)
-            break;
-        if (forItem == index && id == TAG_DIR)
-            lstrcpyn(workDir, (LPSTR)(grp + tag + 6), sizeof workDir);
-        if (forItem == index && id == TAG_MIN)
-            minimized = TRUE;
-        tag += cb;
-    }
-    WriteItem(dir, (LPSTR)(grp + Word(it + 18)), (LPSTR)(grp + Word(it + 20)), workDir,
-              (LPSTR)(grp + Word(it + 22)), Word(it + 4), minimized, TRUE);
-}
-
-static void ConvertGroup(LPCSTR programs, LPCSTR grpFile)
-{
-    char dir[MAX_PATH];
-    HGLOBAL mem;
-    BYTE far *grp;
-    WORD size, i, count;
-    int h = _lopen(grpFile, OF_READ);
-
-    if (h == HFILE_ERROR)
-        return;
-    size = (WORD)_llseek(h, 0, 2);
-    _llseek(h, 0, 0);
-    mem = GlobalAlloc(GMEM_MOVEABLE, size + 1);
-    grp = mem ? GlobalLock(mem) : NULL;
-    if (grp && _lread(h, grp, size) == size && !_fmemcmp(grp, "PMCC", 4)) {
-        grp[size] = 0;
-        ItemName(programs, (LPSTR)(grp + Word(grp + 22)), "", TRUE, dir);
-        DosMakeFolder(dir);
-        count = Word(grp + 32);
-        for (i = 0; i < count; i++)
-            if (Word(grp + GRP_ITEMS + 2 * i))
-                ConvertItem(dir, grp, size, Word(grp + GRP_ITEMS + 2 * i), i);
-    }
-    _lclose(h);
-    if (mem) {
-        GlobalUnlock(mem);
-        GlobalFree(mem);
-    }
-}
-
-/* Start > Programs > Windows Explorer, made once (a deleted one stays gone). */
-/* "Windows Explorer" in dir: Snowball opening C:\ with the folder tree. */
-BOOL ProgramManagerAddExplorer(LPCSTR dir)
-{
-    char path[MAX_PATH];
-
-    _fmemset(&s, 0, sizeof s);
-    lstrcpy(s.target, g_home);
-    lstrcat(s.target, "SNOWBALL.EXE");
-    lstrcpy(s.args, "/E,C:\\");
-    IconsArtFile(s.icon);
-    s.iconIndex = IDI_EXPLORER - 1;     /* icons are numbered in id order from 0 */
-    s.show = SW_SHOWNORMAL;
-    lstrcpy(path, dir);
-    PathAppend(path, DosHasLongNames() ? "Windows Explorer" SHC_EXT : "EXPLORER" SHC_EXT);
-    return ShortcutWrite(path, &s);
-}
-
-static void AddExplorer(LPCSTR programs)
-{
-    if (!SettingsGetInt("Start", "Explorer", 0) && PathIsFolder(programs) && ProgramManagerAddExplorer(programs))
-        SettingsSetInt("Start", "Explorer", 1);
-}
-
-void ProgramManagerConvertGroups(void)
-{
-    char start[MAX_PATH], programs[MAX_PATH], desktop[MAX_PATH], ini[MAX_PATH], file[MAX_PATH];
-    HGLOBAL mem;
-    LPSTR keys, k;
-
-    StartMenuFolder(start);
-    ProgramsDir(programs);
-    lstrcpy(desktop, g_home);
-    PathAppend(desktop, "Desktop");
-    DosMakeFolder(desktop);
-    if (PathIsFolder(programs)) {          /* converted before */
-        AddExplorer(programs);
-        return;
-    }
-    DosMakeFolder(start);
-    DosMakeFolder(programs);
-
-    GetWindowsDirectory(ini, sizeof ini);
-    PathAppend(ini, "PROGMAN.INI");
-    if ((mem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 1024)) == NULL)
-        return;
-    keys = GlobalLock(mem);
-    GetPrivateProfileString("Groups", NULL, "", keys, 1024, ini);
-    for (k = keys; *k; k += lstrlen(k) + 1) {
-        GetPrivateProfileString("Groups", k, "", file, sizeof file, ini);
-        if (*file)
-            ConvertGroup(programs, file);
-    }
-    GlobalUnlock(mem);
-    GlobalFree(mem);
-    AddExplorer(programs);
+    return ProgramManagerWriteItem(dir, title, cmd, "", "", 0, FALSE, 0);
 }
 
 /* ---- DDE: what setup programs ask of Program Manager ---- */
@@ -283,14 +172,14 @@ static BOOL Command(DDECMD *c)
 
     for (i = 0; i < 8 && lstrcmpi(c->name, Commands[i]); i++)
         ;
-    ProgramsDir(programs);
+    ProgramManagerFolder(programs);
     dir = *group ? group : programs;
     switch (i) {
     case 0:                             /* CreateGroup(name[, file]): made or found */
     case 1:                             /* ShowGroup(name, show) */
         if (!*Arg(c, 0))
             return FALSE;
-        ItemName(programs, Arg(c, 0), "", FALSE, path);
+        ProgramManagerItemName(programs, Arg(c, 0), "", 1, path);
         if (!PathIsFolder(path)) {
             if (i == 1 || !DosMakeFolder(path))
                 return FALSE;
@@ -302,7 +191,7 @@ static BOOL Command(DDECMD *c)
             FolderWindowOpen(path);           /* as Windows 95 shows a new group */
         return TRUE;
     case 2:                             /* DeleteGroup(name): to the Recycle Bin */
-        ItemName(programs, Arg(c, 0), "", FALSE, path);
+        ProgramManagerItemName(programs, Arg(c, 0), "", 1, path);
         if (!*Arg(c, 0) || !PathIsFolder(path))
             return FALSE;
         PathListInit(&l);
@@ -313,13 +202,13 @@ static BOOL Command(DDECMD *c)
             *group = '\0';
         return ok;
     case 3:                             /* AddItem(command[, name, icon, index, x, y, dir, hotkey, minimized]) */
-        if (!WriteItem(dir, Arg(c, 1), Arg(c, 0), Arg(c, 6), Arg(c, 2), atoi(Arg(c, 3)), atoi(Arg(c, 8)), FALSE))
+        if (!ProgramManagerWriteItem(dir, Arg(c, 1), Arg(c, 0), Arg(c, 6), Arg(c, 2), atoi(Arg(c, 3)), atoi(Arg(c, 8)), 1))
             return FALSE;
         FileCommandsFolderChanged(dir);
         return TRUE;
     case 4:                             /* DeleteItem(name) */
     case 5:                             /* ReplaceItem(name): an AddItem follows */
-        ItemName(dir, Arg(c, 0), SHC_EXT, FALSE, path);
+        ProgramManagerItemName(dir, Arg(c, 0), SHC_EXT, 1, path);
         ok = DosDelete(path);
         FileCommandsFolderChanged(dir);
         return ok || i == 5;
@@ -357,16 +246,17 @@ static void Put(LPSTR data, WORD *used, LPCSTR text)
 static HGLOBAL Answer(LPCSTR item)
 {
     char dir[MAX_PATH], spec[MAX_PATH], title[MAX_PATH], line[1024];
-    static DOSENTRY e;
+    DOSENTRY e;
     DOSFIND f;
+    SHORTCUT s;
     HGLOBAL h, small;
     LPSTR data;
     WORD used = 4, count = 0;
     BOOL list = !lstrcmpi(item, "Groups") || !lstrcmpi(item, DDE_NAME);
 
-    ProgramsDir(dir);
+    ProgramManagerFolder(dir);
     if (!list) {
-        ItemName(dir, item, "", FALSE, spec);
+        ProgramManagerItemName(dir, item, "", 1, spec);
         if (!PathIsFolder(spec))
             return NULL;
         lstrcpy(dir, spec);
@@ -468,12 +358,7 @@ LRESULT CALLBACK __export ProgramManagerProc(HWND w, UINT msg, WPARAM wp, LPARAM
    "Progman" as in Windows 95, and without size should one show it. */
 BOOL ProgramManagerServe(void)
 {
-    WNDCLASS wc;
 
-    _fmemset(&wc, 0, sizeof wc);
-    wc.lpfnWndProc = ProgramManagerProc;
-    wc.hInstance = g_hInst;
-    wc.lpszClassName = "Progman";
-    return RegisterClass(&wc) &&
+    return WindowRegister("Progman", ProgramManagerProc, 0, 0, NULL, NULL) &&
            CreateWindow("Progman", "Program Manager", WS_POPUP, 0, 0, 0, 0, NULL, NULL, g_hInst, NULL);
 }

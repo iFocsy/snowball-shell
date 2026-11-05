@@ -79,6 +79,7 @@ static void Done(BOOL go)
 
 LRESULT CALLBACK __export SwitcherProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
+    HOOK_DESCRIBE(msg, SwitcherDescribe((LPSTR)lp, wp));
     switch (msg) {
     case WM_PAINT:
         Paint(w);
@@ -95,17 +96,11 @@ LRESULT CALLBACK __export SwitcherProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 
 static void Show(void)
 {
-    WNDCLASS wc;
     int rows = (n + PER_ROW - 1) / PER_ROW, cols = min(n, PER_ROW);
     int cx = 2 * MARGIN + max(cols * CELL, 200), cy = 2 * MARGIN + rows * CELL + 8 + TITLE_H;
 
     if (!box) {
-        _fmemset(&wc, 0, sizeof wc);
-        wc.lpfnWndProc = SwitcherProc;
-        wc.hInstance = g_hInst;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = SWITCH_CLASS;
-        RegisterClass(&wc);
+        WindowRegister(SWITCH_CLASS, SwitcherProc, 0, 0, NULL, NULL);
         box = CreateWindowEx(WS_EX_TOPMOST, SWITCH_CLASS, "", WS_POPUP, 0, 0, 0, 0, NULL, NULL, g_hInst, NULL);
         if (!box)
             return;
@@ -146,3 +141,15 @@ void SwitcherCommand(UINT what)
         break;
     }
 }
+
+#ifdef SNOWBALL_HOOKS
+/* The tests' hooks (src\hooks): window i, and if it is the one chosen;
+   NULL past the last. */
+HWND SwitcherWindow(int i, BOOL *selected)
+{
+    if (i >= n)
+        return NULL;
+    *selected = i == sel;
+    return wins[i];
+}
+#endif

@@ -5,7 +5,6 @@
 #include "internal.h"
 
 #define TIP_CLASS   "SbTip"
-#define TIP_BACK    RGB(255, 255, 225)
 #define TIP_WRAP    280                 /* longer lines wrap (a folder's infotip) */
 
 static HWND tip;
@@ -18,15 +17,16 @@ LRESULT CALLBACK __export TooltipProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     RECT r;
     HFONT old;
 
+    HOOK_DESCRIBE(msg, TooltipDescribe((LPSTR)lp, wp));
     switch (msg) {
     case WM_PAINT:
         BeginPaint(w, &ps);
         GetClientRect(w, &r);
-        DrawSolidRect(ps.hdc, &r, TIP_BACK);
-        DrawFrame(ps.hdc, &r, RGB(0, 0, 0), RGB(0, 0, 0));
+        DrawSolidRect(ps.hdc, &r, SkinColor(SC_INFO));
+        DrawFrame(ps.hdc, &r, SkinColor(SC_INFOTEXT), SkinColor(SC_INFOTEXT));
         old = SelectObject(ps.hdc, DrawFont(FALSE));
         SetBkMode(ps.hdc, TRANSPARENT);
-        SetTextColor(ps.hdc, RGB(0, 0, 0));
+        SetTextColor(ps.hdc, SkinColor(SC_INFOTEXT));
         if (wrapped) {
             InflateRect(&r, -4, -3);
             DrawText(ps.hdc, text, -1, &r, DT_WORDBREAK | DT_NOPREFIX);
@@ -48,18 +48,13 @@ LRESULT CALLBACK __export TooltipProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
    y when it would not fit below (the taskbar's tips). */
 void TooltipShow(LPCSTR s, int x, int y)
 {
-    WNDCLASS wc;
     HDC dc;
     HFONT old;
     RECT r;
     int cx, cy = 18, sx = GetSystemMetrics(SM_CXSCREEN), sy = GetSystemMetrics(SM_CYSCREEN);
 
     if (!tip) {
-        _fmemset(&wc, 0, sizeof wc);
-        wc.lpfnWndProc = TooltipProc;
-        wc.hInstance = g_hInst;
-        wc.lpszClassName = TIP_CLASS;
-        RegisterClass(&wc);
+        WindowRegister(TIP_CLASS, TooltipProc, 0, 0, NULL, NULL);
         tip = CreateWindowEx(WS_EX_TOPMOST, TIP_CLASS, "", WS_POPUP, 0, 0, 0, 0, NULL, NULL, g_hInst, NULL);
         if (!tip)
             return;
@@ -95,3 +90,10 @@ void TooltipHide(void)
     if (tip && IsWindowVisible(tip))
         ShowWindow(tip, SW_HIDE);
 }
+
+#ifdef SNOWBALL_HOOKS
+LPCSTR TooltipText(void)                /* the tests' hooks (src\hooks) */
+{
+    return text;
+}
+#endif

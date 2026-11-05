@@ -26,6 +26,8 @@
 #define DRAG_MIN    4           /* pixels the mouse moves before a drag starts */
 #define TIMER_EDIT  1           /* slow second click -> rename */
 #define TIMER_TIP   2           /* the mouse rested on a folder: its infotip */
+#define TIMER_POINT 3           /* single-click: pointed at long enough, selected */
+#define POINT_MS    500
 #define TIP_MS      600
 #define MSG_ENDEDIT (WM_USER + 1)   /* wParam: keep the new name */
 #define VK_APPS     0x5D        /* the Menu key (Windows 95's keyboard) */
@@ -35,6 +37,7 @@
 #define IF_WAS      0x04        /* selected when the rubber band started */
 #define IF_FOCUS    0x08        /* follows the focused item through a sort */
 #define IF_PINNED   0x10        /* right after My Computer (the desktop's My Documents) */
+#define IF_NOTHUMB  0x20        /* Thumbnails: it has no picture */
 
 typedef struct {
     WORD  name;                 /* display name, offset in the string pool */
@@ -48,6 +51,7 @@ typedef struct {
     WORD  date, time;
     WORD  textW;                /* width of the name in pixels */
 } ITEM;
+#define MAX_ITEMS   ((int)(0xFFF0U / sizeof(ITEM)) / GROW * GROW)   /* the items' block stays under 64 KB */
 
 typedef struct {
     HGLOBAL  hItems, hPool;
@@ -55,7 +59,9 @@ typedef struct {
     LPSTR    pool;
     int      count, cap;
     WORD     used, poolCap;
-    int      focus, anchor, drop, scroll, hscroll, cols, rows;
+    int      focus, anchor, drop, cols, rows;
+    long     scroll, hscroll;           /* pixels: a big folder goes past 32767 */
+    long     vmax, hmax;                /* how far each goes; the scroll bars show them scaled */
     int      mode, sortKey, cellW;
     BOOL     sortDesc;
     int      ncols, colW[MAX_COLS];
@@ -69,6 +75,7 @@ typedef struct {
     int      hover;             /* the folder the mouse rests on (its infotip), -1 none */
     BOOL     tipUp;
     POINT    moved;             /* where the mouse last really moved (screen) */
+    int      hot;               /* single-click: the item pointed at, underlined; -1 none */
     RECT     bandRect;
     HWND     edit;
     PATHLIST keep;              /* names selected before a refresh */
@@ -87,6 +94,7 @@ void IconViewSelectRange(HWND w, int from, int to, BOOL only);   /* from..to; on
 
 /* ---- iconpaint.c ---- */
 void IconViewLayout(HWND w);                      /* rows, columns, scroll bars */
+void IconViewCell(HWND w, int i, long *x, long *y, int *cx, int *cy);  /* in the whole view, not scrolled */
 void IconViewCellRect(HWND w, int i, RECT *r);
 void IconViewPartRects(HWND w, int i, RECT *icon, RECT *label);  /* the parts the mouse hits */
 void IconViewPaint(HWND w);                       /* WM_PAINT */

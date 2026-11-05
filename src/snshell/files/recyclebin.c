@@ -69,31 +69,33 @@ void RecycleBinRecord(LPCSTR stored, LPCSTR original)
     WritePrivateProfileString("Files", PathFileName((LPSTR)stored), value, info);
 }
 
-/* Calls back for every item of every bin: stored path, original path. */
-typedef void (*BINITEM)(LPCSTR stored, LPCSTR original, void *data);
+/* Calls back for every item of every bin (stored path, original path)
+   until it answers FALSE. */
+typedef BOOL (*BINITEM)(LPCSTR stored, LPCSTR original, void *data);
 
 static void ForEach(BINITEM fn, void *data)
 {
     HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, LIST_MAX);
     LPSTR keys = GlobalLock(h), k, comma;
     char info[32], stored[MAX_PATH], value[MAX_PATH + 16];
+    BOOL more = TRUE;
     int d;
 
     if (!keys)
         return;
-    for (d = 2; d < 26; d++) {
+    for (d = 2; d < 26 && more; d++) {
         if (!FixedDrive(d))
             continue;
         InfoPath('A' + d, info);
         GetPrivateProfileString("Files", NULL, "", keys, LIST_MAX, info);
-        for (k = keys; *k; k += lstrlen(k) + 1) {
+        for (k = keys; *k && more; k += lstrlen(k) + 1) {
             GetPrivateProfileString("Files", k, "", value, sizeof value, info);
             comma = _fstrchr(value, ',');
             comma = comma ? _fstrchr(comma + 1, ',') : NULL;
             BinDir('A' + d, stored);
             PathAppend(stored, k);
             if (comma && DosGetAttributes(stored) != 0xFFFF)
-                fn(stored, comma + 1, data);
+                more = fn(stored, comma + 1, data);
             else                        /* gone: forget it */
                 WritePrivateProfileString("Files", k, NULL, info);
         }
@@ -102,31 +104,35 @@ static void ForEach(BINITEM fn, void *data)
     GlobalFree(h);
 }
 
-static void CountItem(LPCSTR stored, LPCSTR original, void *data)
+static BOOL Found(LPCSTR stored, LPCSTR original, void *data)
 {
-    (*(int *)data)++;
+    *(BOOL *)data = TRUE;
+    return FALSE;                       /* one is enough */
 }
 
-static void AddItem(LPCSTR stored, LPCSTR original, void *data)
+static BOOL AddItem(LPCSTR stored, LPCSTR original, void *data)
 {
-    static DOSENTRY e;
+    DOSENTRY e;
     char name[MAX_PATH];
 
     DisplayNameOfFile(PathFileName((LPSTR)original), name);
     if (DosGetEntry(stored, &e))
         IconViewAdd(*(HWND *)data, name, stored, (e.attr & FA_DIR) ? IVK_FOLDER : IVK_FILE, &e);
+    return TRUE;
 }
 
-static void ListItem(LPCSTR stored, LPCSTR original, void *data)
+static BOOL ListItem(LPCSTR stored, LPCSTR original, void *data)
 {
     PathListAdd((PATHLIST *)data, stored);
+    return TRUE;
 }
 
 BOOL RecycleBinIsEmpty(void)
 {
-    int n = 0;
-    ForEach(CountItem, &n);
-    return n == 0;
+    BOOL any = FALSE;
+
+    ForEach(Found, &any);
+    return !any;
 }
 
 void RecycleBinLoad(HWND iv)
@@ -229,24 +235,14 @@ void RecycleBinPurge(HWND owner, PATHLIST *stored)
 /* Bytes an item takes: a file's size, a folder's files'. */
 static DWORD Weight(LPCSTR path)
 {
-    static DOSENTRY e;
-    char spec[MAX_PATH], sub[MAX_PATH];
-    DWORD n = 0;
-    DOSFIND f;
+    DOSENTRY e;
+    DWORD bytes = 0;
+    WORD files = 0, folders = 0;
 
     if (!PathIsFolder(path))
         return DosGetEntry(path, &e) ? e.size : 0;
-    lstrcpy(spec, path);
-    PathAppend(spec, "*.*");
-    if (DosFindFirst(spec, &f, &e)) {
-        do {
-            lstrcpy(sub, path);
-            PathAppend(sub, e.name);
-            n += (e.attr & FA_DIR) ? Weight(sub) : e.size;
-        } while (DosFindNext(&f, &e));
-        DosFindClose(&f);
-    }
-    return n;
+    FileOperationTotals(path, &bytes, &files, &folders);
+    return bytes;
 }
 
 typedef struct { char name[13]; DWORD when, weight; } TRIMITEM;
@@ -317,4 +313,26 @@ void RecycleBinEmptyAll(HWND owner)
         }
     }
     PathListFree(&all);
+}
+
+DWORD RecycleBinDrive(HWND owner, int drive, BOOL empty)
+{
+    PATHLIST all, mine;
+    LPSTR p;
+    DWORD bytes = 0;
+
+    PathListInit(&all);
+    PathListInit(&mine);
+    ForEach(ListItem, &all);
+    for (p = PathListLock(&all); *p; p = PathListNext(p))
+        if ((p[0] | 0x20) - 'a' == drive) {
+            bytes += Weight(p);
+            PathListAdd(&mine, p);
+        }
+    PathListUnlock(&all);
+    if (empty && mine.count)
+        Purge(owner, &mine);
+    PathListFree(&all);
+    PathListFree(&mine);
+    return bytes;
 }

@@ -1,0 +1,29 @@
+USER and GDI Resource Extensions (USERX.DRV, GDIX.DRV)
+======================================================
+
+Windows 3.1 keeps windows, menus and graphics data in small areas of at
+most 64 KB each: the USER and GDI resources shown as free system resources.
+These two drivers move data out of those areas. They do not change any
+Windows file, they load when Windows starts, and they work with any shell.
+
+USERX.DRV, USER Resource Extension
+  Moves the contents of closed menus to its own memory and returns them
+  when a menu opens. Programs see their menus unchanged.
+
+GDIX.DRV, GDI Resource Extension
+  Moves display driver graphics data to its own memory. It tests itself
+  with the display driver each time Windows starts, and stays disabled if
+  the test fails.
+
+Install:
+  Select them in Snowball Setup, or copy them to WINDOWS\SYSTEM and add them
+  to the "drivers=" line in the [boot] section of SYSTEM.INI.
+
+Disable:
+  Display Properties, Effects tab; or, in SYSTEM.INI, Enabled=0 in the
+  [userx.drv] and [gdix.drv] sections. Takes effect when Windows restarts.
+
+Requirements:
+  386 or later, no math coprocessor needed. Tested with Windows for
+  Workgroups 3.11 in 386 enhanced mode. USERX.DRV stays disabled with a
+  USER.EXE it does not recognize. The Effects tab reports a disabled driver.

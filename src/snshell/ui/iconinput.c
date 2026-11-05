@@ -130,7 +130,7 @@ void IconViewEditText(HWND iv, LPSTR out, int size)
 /* Column under x; *edge: x is on its right edge (drag to resize). */
 static int HeaderHit(VIEW *v, int x, BOOL *edge)
 {
-    int col, right = -v->hscroll;
+    int col, right = (int)-v->hscroll;
 
     for (col = 0; col < v->ncols; col++) {
         right += v->colW[col];
@@ -288,6 +288,9 @@ void IconViewButtonUp(HWND w, UINT msg, WPARAM keys, int x, int y)
     } else if (msg == WM_RBUTTONUP) {
         UpdateWindow(w);                /* what it is for shows before its menu */
         IconViewNotify(w, IVN_CONTEXT);
+    } else if (v->pressed >= 0 && !(keys & (MK_CONTROL | MK_SHIFT)) && g_viewOptions.singleClick) {
+        IconViewSelect(w, v->pressed);  /* Web style: a click opens */
+        IconViewNotify(w, IVN_OPEN);
     } else if (v->pressed >= 0 && !(keys & (MK_CONTROL | MK_SHIFT))) {
         if (v->slowClick)
             SetTimer(w, TIMER_EDIT, GetDoubleClickTime() + 100, NULL);
@@ -381,6 +384,27 @@ static void TipTimer(HWND w)
     SetTimer(w, TIMER_TIP, 200, NULL);  /* watches the mouse */
 }
 
+/* Single-click: the name pointed at underlined, selected after a rest. */
+static void Point(HWND w, int i)
+{
+    VIEW *v = View(w);
+    RECT r;
+
+    if (!g_viewOptions.singleClick || i == v->hot)
+        return;
+    if (v->hot >= 0 && v->hot < v->count) {
+        IconViewCellRect(w, v->hot, &r);
+        InvalidateRect(w, &r, FALSE);
+    }
+    if ((v->hot = i) >= 0) {
+        IconViewCellRect(w, i, &r);
+        InvalidateRect(w, &r, FALSE);
+        SetTimer(w, TIMER_POINT, POINT_MS, NULL);
+    } else {
+        KillTimer(w, TIMER_POINT);
+    }
+}
+
 void IconViewMouseMove(HWND w, WPARAM keys, int x, int y)
 {
     VIEW *v = View(w);
@@ -391,6 +415,7 @@ void IconViewMouseMove(HWND w, WPARAM keys, int x, int y)
         if (p.x != v->moved.x || p.y != v->moved.y) {
             v->moved = p;
             Hover(w, IconViewHitTest(w, x, y));
+            Point(w, IconViewHitTest(w, x, y));
         }
     }
     if (v->sizing >= 0) {
@@ -549,6 +574,14 @@ void IconViewTimer(HWND w, WPARAM id)
 
     if (id == TIMER_TIP) {
         TipTimer(w);
+        return;
+    }
+    if (id == TIMER_POINT) {            /* still pointed at, no button down: selected */
+        KillTimer(w, TIMER_POINT);
+        if (v->hot >= 0 && v->hot < v->count && !Sel(v, v->hot) && !v->button && GetCapture() == NULL) {
+            IconViewSelect(w, v->hot);
+            IconViewNotify(w, IVN_SELECT);
+        }
         return;
     }
     KillTimer(w, TIMER_EDIT);

@@ -1,8 +1,6 @@
 /* Lists of paths in one global block, each ending in '\0'. */
 #include "internal.h"
 
-/* ---- path lists: one global block, up to 64 KB ---- */
-
 void PathListInit(PATHLIST *l)
 {
     _fmemset(l, 0, sizeof *l);
@@ -44,6 +42,17 @@ LPSTR PathListLock(PATHLIST *l)
 LPSTR PathListNext(LPSTR p)
 {
     return p + lstrlen(p) + 1;
+}
+
+BOOL PathListAt(PATHLIST *l, int i, LPSTR out)
+{
+    LPSTR p = PathListLock(l);
+
+    for (; *p && i > 0; i--)
+        p = PathListNext(p);
+    lstrcpy(out, p);
+    PathListUnlock(l);
+    return *out != '\0';
 }
 
 void PathListUnlock(PATHLIST *l)

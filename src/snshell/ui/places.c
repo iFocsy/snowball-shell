@@ -86,5 +86,5 @@ void PlacesDraw(const DRAWITEMSTRUCT FAR *d)
     field = !SendMessage(d->hwndItem, CB_GETDROPPEDSTATE, 0, 0L) || d->rcItem.top % PLACE_H;
     SendMessage(d->hwndItem, CB_GETLBTEXT, d->itemID, (LPARAM)(LPSTR)path);
     PlacesName(path, name);
-    PaintListItem(d, d->rcItem.left + 2 + (field ? 0 : INDENT * LOWORD(d->itemData)), PlacesIcon(path), name);
+    PaintListItem(d, d->rcItem.left + 2 + (field ? 0 : INDENT * LOWORD(d->itemData)), PlacesIcon(path), name, FALSE);
 }

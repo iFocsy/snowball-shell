@@ -15,5 +15,9 @@
 *.obj
 __pycache__/
 
-# The maintainer's technical notes
-/docs/
+# The maintainer's technical notes (docs\ is the project's: it goes into git)
+/technical/
+
+# The host install into this machine's DOSBox-X (its runtime\drive-c and win.conf): not made for others
+/src/setup/install.ps1
+/src/setup/sysfont.ps1

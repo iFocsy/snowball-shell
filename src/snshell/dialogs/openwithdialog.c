@@ -10,7 +10,7 @@
 #define MAX_OTHERS      16
 #define ROW_H           18
 
-static char programs[MAX_PROGRAMS][MAX_PATH];
+static char (FAR *programs)[MAX_PATH];  /* while the dialog is up (12 KB) */
 static int nPrograms;
 static LPCSTR openFile;
 static char ext[8], typeDesc[64];
@@ -114,7 +114,7 @@ static void DrawRow(const DRAWITEMSTRUCT FAR *d)
     if (d->itemID == (UINT)-1)
         return;
     SendMessage(d->hwndItem, LB_GETTEXT, d->itemID, (LPARAM)(LPSTR)name);
-    PaintListItem(d, d->rcItem.left + 2, IconForFile(programs[(int)d->itemData], FALSE), name);
+    PaintListItem(d, d->rcItem.left + 2, IconForFile(programs[(int)d->itemData], FALSE), name, FALSE);
 }
 
 static void Choose(HWND dlg)
@@ -153,7 +153,7 @@ BOOL CALLBACK __export OpenWithDialogProc(HWND dlg, UINT msg, WPARAM wp, LPARAM 
         SetDlgItemText(dlg, IDC_OPENWITH_TEXT, text);
         if (ext[0]) {
             wsprintf(text, "Description of '.%s' files:", (LPSTR)ext);
-            AnsiLower(text + 17);
+            AnsiLower(_fstrchr(text, '.'));     /* the extension */
             SetDlgItemText(dlg, IDC_OPENWITH_DESCL, text);
         }
         typeDesc[0] = '\0';
@@ -218,11 +218,18 @@ BOOL CALLBACK __export OpenWithDialogProc(HWND dlg, UINT msg, WPARAM wp, LPARAM 
 BOOL OpenWithDialogShow(HWND owner, LPCSTR file)
 {
     LPSTR dot = PathExtension((LPSTR)file);
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, (DWORD)MAX_PROGRAMS * MAX_PATH);
 
+    if (!h)
+        return FALSE;
+    programs = (char (FAR *)[MAX_PATH])GlobalLock(h);
     openFile = file;
     lstrcpyn(ext, *dot ? dot + 1 : "", sizeof ext);
     AnsiUpper(ext);
     opened = FALSE;
     DialogBox(g_hInst, MAKEINTRESOURCE(IDD_OPENWITH), owner, (DLGPROC)OpenWithDialogProc);
+    GlobalUnlock(h);
+    GlobalFree(h);
+    programs = NULL;
     return opened;
 }

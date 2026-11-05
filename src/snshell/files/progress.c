@@ -34,7 +34,7 @@ static RECT part[PARTS];            /* client rectangles of the painted parts */
 
 static char texts[PARTS][MAX_PATH + 40];    /* "From 'a' to 'b'" is cut to fit */
 
-static const char *Titles[] = { "Copying...", "Moving...", "Deleting...", "Deleting..." };
+static const char *Titles[] = { "Copying...", "Moving...", "Deleting...", "Deleting...", "Preparing the wallpaper..." };
 
 /* 0..1000 without overflowing 32 bits. */
 static int Permille(DWORD part, DWORD whole)
@@ -52,20 +52,10 @@ static int Fill(void)
     return (int)((long)(part[P_BAR].right - part[P_BAR].left - 4) * Permille(done, total) / 1000);
 }
 
-/* Windows 98 progress bar: sunken edge, blocks in the highlight colour. */
 static void DrawBar(HDC dc, RECT *all)
 {
-    RECT in = *all, b;
-    int step, x;
-
     shownFill = Fill();
-    DrawFrame(dc, all, GetSysColor(COLOR_BTNSHADOW), GetSysColor(COLOR_BTNHIGHLIGHT));
-    InflateRect(&in, -2, -2);
-    step = (in.bottom - in.top) * 2 / 3 + 2;
-    for (x = in.left; x < in.left + shownFill; x += step) {
-        SetRect(&b, x, in.top, min(x + step - 2, in.right), in.bottom);
-        DrawSolidRect(dc, &b, GetSysColor(COLOR_HIGHLIGHT));
-    }
+    PaintProgressBar(dc, all, Permille(done, total), GetSysColor(COLOR_HIGHLIGHT));
 }
 
 /* c1 -> c2 by n/8. */

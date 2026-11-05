@@ -1,10 +1,12 @@
 /*
  * Windows 98 look for every program's windows (part of SNSYSTEM.DLL), in
  * three parts:
- *   skin.c      captions and frames, document windows (MDI) in the menu
- *               bar and as strips, putting the skin on windows
+ *   skin.c      captions and frames, minimized document windows (MDI) as
+ *               strips, putting the skin on windows
+ *   skinmdi.c   a maximized document window's items in the menu bar
  *   skinctl.c   dialogs and their controls
  *   skinmenu.c  popup menus
+ *   skinscroll.c  scroll bars' arrows
  *   skinint.h   what they share
  *
  * The skin only replaces how windows are drawn: they keep their own
@@ -14,32 +16,37 @@
 #include "snsystem.h"
 #include "skinint.h"
 
-#define MDIBARS "SbMdiBars"     /* a frame whose menu bar has our document items: */
-                                /* the document window they are for */
-#define MDIMENU "SbMdiMenu"     /* ... and its window menu, opened by our icon item */
-#define MDI_ITEM 0x53420000L    /* item data of those owner-drawn items, + MI_* */
 #define MOVING  "SbMoving"      /* a minimized document window being dragged, */
 #define PLACED  "SbPlaced"      /* ... left where it was dropped */
 #define PENDING "SbPending"     /* a strip to be put in its place */
 
-enum { MI_ICON = 1, MI_MIN, MI_RESTORE, MI_CLOSE };
-
 LRESULT CALLBACK __export SkinIconTitleProc(HWND w, UINT msg, WPARAM wp, LPARAM lp);
+
+/* Back to its own procedure, the skin's properties gone: it is being
+   destroyed, or the skin comes off. */
+void SkinUnsubclass(HWND w)
+{
+    WNDPROC old = (WNDPROC)MAKELONG(GetProp(w, OLD_LO), GetProp(w, OLD_HI));
+
+    if (!old)
+        return;
+    SetWindowLong(w, GWL_WNDPROC, (LONG)old);
+    RemoveProp(w, OLD_LO);
+    RemoveProp(w, OLD_HI);
+    RemoveProp(w, MDIBARS);
+    RemoveProp(w, MDIMENU);
+    RemoveProp(w, FRAMED);
+    RemoveProp(w, MOVING);
+    RemoveProp(w, PLACED);
+    RemoveProp(w, PENDING);
+}
 
 LRESULT SkinCallOld(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
     WNDPROC old = (WNDPROC)MAKELONG(GetProp(w, OLD_LO), GetProp(w, OLD_HI));
-    if (msg == WM_NCDESTROY) {
-        SetWindowLong(w, GWL_WNDPROC, (LONG)old);
-        RemoveProp(w, OLD_LO);
-        RemoveProp(w, OLD_HI);
-        RemoveProp(w, MDIBARS);
-        RemoveProp(w, MDIMENU);
-        RemoveProp(w, FRAMED);
-        RemoveProp(w, MOVING);
-        RemoveProp(w, PLACED);
-        RemoveProp(w, PENDING);
-    }
+
+    if (msg == WM_NCDESTROY)
+        SkinUnsubclass(w);
     return CallWindowProc((FARPROC)old, w, msg, wp, lp);
 }
 
@@ -58,6 +65,7 @@ void SkinSubclass(HWND w, WNDPROC proc)
 #define HT_SB_CLOSE  SKIN_CLOSE /* our caption buttons (Windows 3.1 has no close button) */
 #define HT_SB_MAX    SKIN_MAX
 #define HT_SB_MIN    SKIN_MIN
+#define HT_SB_RESTORE SKIN_RESTORE  /* (a glyph only) */
 
 #define STRIP_W      160        /* a minimized document window, as in Windows 98 */
 #define STRIP_FRAME  3
@@ -124,10 +132,10 @@ static BOOL Active(HWND w)
     return (HWND)LOWORD(SendMessage(GetParent(w), WM_MDIGETACTIVE, 0, 0L)) == w && GetActiveWindow() == top;
 }
 
-/* Black glyphs drawn from rectangles: close X, maximize, restore, minimize. */
+/* Glyphs drawn from rectangles: close X, maximize, restore, minimize. */
 static void Glyph(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled)
 {
-    COLORREF c = enabled ? RGB(0, 0, 0) : GetSysColor(COLOR_BTNSHADOW);
+    COLORREF c = DrawSysColor(enabled ? COLOR_BTNTEXT : COLOR_BTNSHADOW);
     int x = (b->left + b->right) / 2 + down, y = (b->top + b->bottom) / 2 + down, i;
     RECT r;
 
@@ -142,11 +150,11 @@ static void Glyph(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled)
         SetRect(&r, x - 5, y - 5, x + 4, y + 4);        DrawFrame(dc, &r, c, c);
         SetRect(&r, x - 5, y - 4, x + 4, y - 3);        DrawSolidRect(dc, &r, c);
         break;
-    case HT_SB_MAX + 100:                               /* restore: two windows */
+    case HT_SB_RESTORE:                               /* restore: two windows */
         SetRect(&r, x - 3, y - 6, x + 4, y + 0);        DrawFrame(dc, &r, c, c);
         SetRect(&r, x - 3, y - 5, x + 4, y - 4);        DrawSolidRect(dc, &r, c);
         SetRect(&r, x - 5, y - 3, x + 2, y + 3);
-        DrawSolidRect(dc, &r, GetSysColor(COLOR_BTNFACE));
+        DrawSolidRect(dc, &r, DrawSysColor(COLOR_BTNFACE));
         DrawFrame(dc, &r, c, c);
         SetRect(&r, x - 5, y - 2, x + 2, y - 1);        DrawSolidRect(dc, &r, c);
         break;
@@ -156,13 +164,13 @@ static void Glyph(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled)
     }
 }
 
-static void CaptionButton(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled)
+void SkinDrawButton(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled)
 {
     RECT r = *b;
 
     if (IsRectEmpty(&r))
         return;
-    DrawSolidRect(dc, &r, GetSysColor(COLOR_BTNFACE));
+    DrawSolidRect(dc, &r, DrawSysColor(COLOR_BTNFACE));
     DrawBevel(dc, &r, down);
     Glyph(dc, &r, which, down, enabled);
 }
@@ -171,136 +179,7 @@ static void CaptionButton(HDC dc, const RECT *b, int which, BOOL down, BOOL enab
 void SNSYSTEM_API SkinCaptionButton(HDC dc, const RECT FAR *r, int which)
 {
     RECT b = *r;
-    CaptionButton(dc, &b, which, FALSE, TRUE);
-}
-
-/* ---- a maximized document window's place in its program's menu bar ---- */
-
-static HWND MdiClient(HWND frame)
-{
-    char cls[12];
-    HWND c;
-
-    for (c = GetWindow(frame, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
-        GetClassName(c, cls, sizeof cls);
-        if (!lstrcmpi(cls, "MDIClient"))
-            return c;
-    }
-    return NULL;
-}
-
-static void CaptionButton(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled);
-
-/* With a document window maximized, MDI puts Windows 3.1's two bitmaps in
-   the menu bar: the window menu box first, the restore button last. Here
-   they become, as in Windows 98, the document's icon and three buttons:
-   Minimize and Restore are put in before the last item, which becomes
-   Close (DefFrameProc hands the document these commands, as it did
-   Restore). MDI no longer knows them as its own, so what it does when it
-   takes its items out is done here: they go once nothing is maximized, or
-   when MDI puts in fresh ones for another document, and the document they
-   were for gets its window menu style back (MDI takes it while maximized).
-   Nothing changes when nothing has to (this runs on repaints). */
-static void MdiDone(HWND frame)
-{
-    HWND child = (HWND)GetProp(frame, MDIBARS);
-
-    if (IsWindow(child) && !IsZoomed(child) && !(GetWindowLong(child, GWL_STYLE) & WS_SYSMENU)) {
-        SetWindowLong(child, GWL_STYLE, GetWindowLong(child, GWL_STYLE) | WS_SYSMENU);
-        SetWindowPos(child, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    }
-}
-
-static void MdiMenu(HWND frame)
-{
-    HMENU m = GetMenu(frame);
-    HWND client = MdiClient(frame);
-    BOOL ours = GetProp(frame, MDIBARS) != NULL, changed = FALSE;
-    DWORD act;
-    int last;
-
-    if (!m || !client)
-        return;
-    act = SendMessage(client, WM_MDIGETACTIVE, 0, 0L);
-    if (LOWORD(act) && HIWORD(act)) {
-        /* A menu's item that opens a menu has its flags in the low byte only
-           (MF_BITMAP is there, MF_OWNERDRAW is not): ours is known by its menu. */
-        if ((GetMenuState(m, 0, MF_BYPOSITION) & MF_BITMAP) && GetSubMenu(m, 0)) {
-            if (GetSubMenu(m, 1) && GetSubMenu(m, 1) == (HMENU)GetProp(frame, MDIMENU))
-                RemoveMenu(m, 1, MF_BYPOSITION);                    /* the icon of the one before */
-            SetProp(frame, MDIMENU, (HANDLE)GetSubMenu(m, 0));
-            if (ours && (HWND)GetProp(frame, MDIBARS) != (HWND)LOWORD(act)) {
-                MdiDone(frame);
-                SetProp(frame, MDIBARS, (HANDLE)LOWORD(act));
-            }
-            ModifyMenu(m, 0, MF_BYPOSITION | MF_POPUP | MF_OWNERDRAW, (UINT)GetSubMenu(m, 0),
-                       (LPCSTR)(MDI_ITEM | MI_ICON));
-            changed = TRUE;
-        }
-        last = GetMenuItemCount(m) - 1;
-        if (last > 0 && GetMenuItemID(m, last) == SC_RESTORE && (GetMenuState(m, last, MF_BYPOSITION) & MF_BITMAP)) {
-            if (ours)
-                DeleteMenu(m, SC_CLOSE, MF_BYCOMMAND);      /* the Close of the one before */
-            else {
-                InsertMenu(m, last, MF_BYPOSITION | MF_OWNERDRAW | MF_HELP, SC_MINIMIZE, (LPCSTR)(MDI_ITEM | MI_MIN));
-                InsertMenu(m, last + 1, MF_BYPOSITION | MF_OWNERDRAW, SC_RESTORE, (LPCSTR)(MDI_ITEM | MI_RESTORE));
-                SetProp(frame, MDIBARS, (HANDLE)LOWORD(act));
-            }
-            last = GetMenuItemCount(m) - 1;
-            ModifyMenu(m, last, MF_BYPOSITION | MF_OWNERDRAW, SC_CLOSE, (LPCSTR)(MDI_ITEM | MI_CLOSE));
-            changed = TRUE;
-        }
-    } else if (ours) {
-        if (GetSubMenu(m, 0) && GetSubMenu(m, 0) == (HMENU)GetProp(frame, MDIMENU))
-            RemoveMenu(m, 0, MF_BYPOSITION);            /* the document's window menu: not ours to destroy */
-        RemoveProp(frame, MDIMENU);
-        DeleteMenu(m, SC_MINIMIZE, MF_BYCOMMAND);
-        DeleteMenu(m, SC_RESTORE, MF_BYCOMMAND);
-        DeleteMenu(m, SC_CLOSE, MF_BYCOMMAND);
-        MdiDone(frame);
-        RemoveProp(frame, MDIBARS);
-        changed = TRUE;
-    }
-    if (changed)
-        DrawMenuBar(frame);
-}
-
-static void CaptionButton(HDC dc, const RECT *b, int which, BOOL down, BOOL enabled);
-
-/* The four items: the document's icon, or a button of caption buttons' look. */
-static BOOL MdiItem(HWND frame, UINT msg, LPARAM lp)
-{
-    MEASUREITEMSTRUCT FAR *mi = (MEASUREITEMSTRUCT FAR *)lp;
-    const DRAWITEMSTRUCT FAR *d = (const DRAWITEMSTRUCT FAR *)lp;
-    HWND child;
-    HICON icon;
-    RECT r;
-    int which;
-
-    if (msg == WM_MEASUREITEM) {
-        if (mi->CtlType != ODT_MENU || HIWORD(mi->itemData) != HIWORD(MDI_ITEM))
-            return FALSE;
-        mi->itemWidth = LOWORD(mi->itemData) == MI_ICON ? 16 : 14;
-        mi->itemHeight = GetSystemMetrics(SM_CYMENU) - 2;
-        return TRUE;
-    }
-    if (d->CtlType != ODT_MENU || HIWORD(d->itemData) != HIWORD(MDI_ITEM))
-        return FALSE;
-    r = d->rcItem;
-    DrawSolidRect(d->hDC, &r, GetSysColor(COLOR_MENU));
-    which = LOWORD(d->itemData);
-    if (which == MI_ICON) {
-        child = (HWND)LOWORD(SendMessage(MdiClient(frame), WM_MDIGETACTIVE, 0, 0L));
-        icon = child ? (HICON)GetClassWord(child, GCW_HICON) : NULL;
-        if (!icon)                      /* as Windows 98 shows such documents */
-            icon = LoadIcon(NULL, IDI_APPLICATION);
-        DrawIconImage(d->hDC, r.left + (r.right - r.left - 16) / 2, r.top + (r.bottom - r.top - 16) / 2, icon, TRUE);
-    } else {
-        SetRect(&r, r.left, r.top + (r.bottom - r.top - 14) / 2, r.left + 16, r.top + (r.bottom - r.top - 14) / 2 + 14);
-        CaptionButton(d->hDC, &r, which == MI_MIN ? HT_SB_MIN : which == MI_CLOSE ? HT_SB_CLOSE : HT_SB_MAX + 100,
-                      (d->itemState & ODS_SELECTED) != 0, TRUE);
-    }
-    return TRUE;
+    SkinDrawButton(dc, &b, which, FALSE, TRUE);
 }
 
 static void PaintFrame(HWND w, BOOL active, int pressed)
@@ -324,7 +203,7 @@ static void PaintFrame(HWND w, BOOL active, int pressed)
     }
     if (g.frame > 0) {                                  /* raised edge, then face */
         r = win;
-        DrawFrame(dc, &r, GetSysColor(COLOR_BTNFACE), RGB(0, 0, 0));
+        DrawFrame(dc, &r, GetSysColor(COLOR_BTNFACE), SkinColor(SC_DKSHADOW));
         InflateRect(&r, -1, -1);
         DrawFrame(dc, &r, GetSysColor(COLOR_BTNHIGHLIGHT), GetSysColor(COLOR_BTNSHADOW));
         for (i = 2; i < g.frame; i++) {                 /* the border's colour */
@@ -337,7 +216,7 @@ static void PaintFrame(HWND w, BOOL active, int pressed)
     SetRect(&t, r.left, r.bottom, r.right, r.bottom + 1);
     DrawSolidRect(dc, &t, GetSysColor(COLOR_BTNFACE));
     DrawGradient(dc, &r, GetSysColor(active ? COLOR_ACTIVECAPTION : COLOR_INACTIVECAPTION),
-             active ? CAPTION_END_ACTIVE : CAPTION_END_INACTIVE, FALSE);
+             SkinColor(active ? SC_GRADIENT_ACTIVE : SC_GRADIENT_INACTIVE), FALSE);
 
     t = r;
     t.left += 2;
@@ -355,11 +234,11 @@ static void PaintFrame(HWND w, BOOL active, int pressed)
     DrawTextEllipsis(dc, title, &t, DT_LEFT | DT_NOPREFIX);
     SelectObject(dc, old);
 
-    CaptionButton(dc, &g.min, IsIconic(w) ? HT_SB_MAX + 100 : HT_SB_MIN, pressed == HT_SB_MIN,
+    SkinDrawButton(dc, &g.min, IsIconic(w) ? HT_SB_RESTORE : HT_SB_MIN, pressed == HT_SB_MIN,
                   (style & WS_MINIMIZEBOX) != 0);
-    CaptionButton(dc, &g.max, IsZoomed(w) ? HT_SB_MAX + 100 : HT_SB_MAX, pressed == HT_SB_MAX,
+    SkinDrawButton(dc, &g.max, IsZoomed(w) ? HT_SB_RESTORE : HT_SB_MAX, pressed == HT_SB_MAX,
                   (style & WS_MAXIMIZEBOX) != 0);
-    CaptionButton(dc, &g.close, HT_SB_CLOSE, pressed == HT_SB_CLOSE, TRUE);
+    SkinDrawButton(dc, &g.close, HT_SB_CLOSE, pressed == HT_SB_CLOSE, TRUE);
     if (GetMenu(w) && !(style & WS_CHILD)) {    /* Windows 3.1's black line under the menu bar */
         POINT o;
         RECT c, wr;
@@ -615,7 +494,7 @@ static void AfterOld(HWND w, UINT msg, LPARAM lp)
         if (IsWindow(w) && !IsIconic(w)) {
             PaintFrame(w, Active(w), 0);
             if (!(GetWindowLong(w, GWL_STYLE) & WS_CHILD))
-                MdiMenu(w);
+                SkinMdiMenu(w);
         } else if (IsWindow(w) && IsMdiChild(w)) {
             PaintFrame(w, Active(w), 0);
         }
@@ -635,14 +514,17 @@ static void AfterOld(HWND w, UINT msg, LPARAM lp)
 
 LRESULT CALLBACK __export SkinFrameProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 {
+    LONG style = GetWindowLong(w, GWL_STYLE);  /* (every message of every skinned window comes here) */
     LRESULT res;
+    BOOL strip;
     int hit;
 
-    if ((GetWindowLong(w, GWL_STYLE) & WS_CAPTION) != WS_CAPTION)
+    if ((style & WS_CAPTION) != WS_CAPTION)
         return SkinCallOld(w, msg, wp, lp);
-    if (msg == WM_WINDOWPOSCHANGING && IsIconic(w) && IsMdiChild(w))
+    strip = (style & WS_MINIMIZE) && IsMdiChild(w);
+    if (strip && msg == WM_WINDOWPOSCHANGING)
         StripSize((WINDOWPOS FAR *)lp);
-    else if (IsIconic(w) && IsMdiChild(w) && StripMessage(w, msg, wp, lp, &res))
+    else if (strip && StripMessage(w, msg, wp, lp, &res))
         return res;
     switch (msg) {
     case WM_NCHITTEST:
@@ -651,7 +533,7 @@ LRESULT CALLBACK __export SkinFrameProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         break;
     case WM_MEASUREITEM:
     case WM_DRAWITEM:
-        if (MdiItem(w, msg, lp))
+        if (SkinMdiItem(w, msg, lp))
             return TRUE;
         break;
     case WM_NCLBUTTONDOWN:
@@ -662,6 +544,13 @@ LRESULT CALLBACK __export SkinFrameProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
         if (CaptionDoubleClick(w, wp))
             return 0;
         break;
+    case WM_SYSCOMMAND:
+        HookZoom(w, wp & 0xFFF0);
+        if ((wp & 0xFFF0) != SC_MOVE || (style & WS_CHILD))
+            break;
+        res = SkinCallOld(w, msg, wp, lp);  /* Windows' move, over when it returns */
+        HookMoved(w);
+        return res;
     case WM_NCACTIVATE:                 /* Windows draws the old caption first */
         res = SkinCallOld(w, msg, wp, lp);
         PaintFrame(w, (BOOL)wp, 0);
@@ -672,10 +561,15 @@ LRESULT CALLBACK __export SkinFrameProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
     return res;
 }
 
+BOOL SkinHas(HWND w)
+{
+    return GetProp(w, OLD_HI) != NULL;
+}
+
 /* Gives a top-level or document window the Windows 98 caption and frame, once. */
 void SNSYSTEM_API SkinFrame(HWND w)
 {
-    if (!(GetWindowLong(w, GWL_STYLE) & WS_CAPTION) || GetProp(w, OLD_HI) ||
+    if (!(GetWindowLong(w, GWL_STYLE) & WS_CAPTION) || GetProp(w, OLD_HI) || !SkinWanted(w) ||
         ((GetWindowLong(w, GWL_STYLE) & WS_CHILD) && !IsMdiChild(w)))
         return;
     SkinSubclass(w, SkinFrameProc);

@@ -17,9 +17,7 @@ static int wizPage;
 
 static void DlgRect(HWND dlg, int id, RECT *r)
 {
-    GetWindowRect(GetDlgItem(dlg, id), r);
-    ScreenToClient(dlg, (POINT FAR *)&r->left);
-    ScreenToClient(dlg, (POINT FAR *)&r->right);
+    WindowRectIn(GetDlgItem(dlg, id), dlg, r);
 }
 
 /* ---- Taskbar Options: the picture ---- */
@@ -40,8 +38,10 @@ static void PreviewMenu(HDC dc, const RECT *d, int bottom, BOOL small)
     DrawBevel(dc, &m, FALSE);
     left = m.left + 2;
     if (!small) {                       /* the banner */
+        COLORREF top, bottom, text;
+        StartMenuBannerColors(&top, &bottom, &text);
         SetRect(&r, left, m.top + 2, left + 12, m.bottom - 2);
-        DrawGradient(dc, &r, RGB(0, 0, 64), RGB(16, 132, 208), TRUE);
+        DrawGradient(dc, &r, top, bottom, TRUE);
         left = r.right;
     }
     SetBkMode(dc, TRANSPARENT);
@@ -62,6 +62,54 @@ static void PreviewMenu(HDC dc, const RECT *d, int bottom, BOOL small)
     }
 }
 
+/* The two-column style: bands at the top and the bottom in the title bar's
+   colours, the left pane in the window colours. */
+static void PreviewColumns(HDC dc, const RECT *d, int bottom, BOOL small)
+{
+    static const struct { LPCSTR left, right; int leftIcon, rightIcon; } rows[] = {
+        { "Windows Explorer", "My Documents", IDI_EXPLORER, IDI_MYDOCS },
+        { "Notepad", "My Computer", IDI_PROGRAM, IDI_COMPUTER },
+        { NULL, "Settings", 0, IDI_SM_SETTINGS },
+        { "All Programs", "Run...", 0, IDI_SM_RUN },
+    };
+    int rowH = small ? 16 : 22, n = sizeof rows / sizeof rows[0], i, y;
+    COLORREF a = GetSysColor(COLOR_ACTIVECAPTION), b = SkinColor(SC_GRADIENT_ACTIVE);
+    RECT m, r;
+
+    SetRect(&m, d->left + 2, bottom - 4 - 2 * 16 - n * rowH, d->left + 262, bottom);
+    DrawSolidRect(dc, &m, GetSysColor(COLOR_MENU));
+    DrawBevel(dc, &m, FALSE);
+    InflateRect(&m, -2, -2);
+    SetRect(&r, m.left, m.top, m.right, m.top + 16);
+    DrawGradient(dc, &r, a, b, FALSE);
+    SetRect(&r, m.left, m.bottom - 16, m.right, m.bottom);
+    DrawGradient(dc, &r, a, b, FALSE);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, GetSysColor(COLOR_CAPTIONTEXT));
+    r.right -= 6;
+    DrawText(dc, "Shut Down...", -1, &r, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+    SetRect(&r, m.left + 6, m.top, m.right, m.top + 16);
+    SelectObject(dc, DrawFont(TRUE));
+    DrawText(dc, "Windows 3.11", -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    SetRect(&r, m.left, m.top + 16, m.left + 118, m.bottom - 16);
+    DrawSolidRect(dc, &r, GetSysColor(COLOR_WINDOW));
+    for (i = 0, y = m.top + 16; i < n; i++, y += rowH) {
+        SelectObject(dc, DrawFont(i == n - 1));                 /* All Programs */
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        SetRect(&r, m.left + 22, y, m.left + 118, y + rowH);
+        if (rows[i].leftIcon)
+            DrawIconImage(dc, m.left + 3, y + (rowH - 16) / 2, IconStock(rows[i].leftIcon), TRUE);
+        if (rows[i].left)
+            DrawText(dc, rows[i].left, -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        SelectObject(dc, DrawFont(i < 2));                      /* My Documents, My Computer */
+        SetTextColor(dc, GetSysColor(COLOR_MENUTEXT));
+        DrawIconImage(dc, m.left + 121, y + (rowH - 16) / 2, IconStock(rows[i].rightIcon), TRUE);
+        SetRect(&r, m.left + 140, y, m.right - 2, y + rowH);
+        DrawText(dc, rows[i].right, -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+    SelectObject(dc, DrawFont(FALSE));
+}
+
 /* A small desktop with the Start menu open over the taskbar, as the
    options would make them. */
 static void PaintPreview(HWND dlg, HDC dc)
@@ -79,7 +127,10 @@ static void PaintPreview(HWND dlg, HDC dc)
     DrawSolidRect(dc, &bar, GetSysColor(COLOR_BTNFACE));
     SetRect(&b, bar.left, bar.top + 1, bar.right, bar.top + 2);
     DrawSolidRect(dc, &b, GetSysColor(COLOR_BTNHIGHLIGHT));
-    PreviewMenu(dc, &d, bar.top, IsDlgButtonChecked(dlg, IDC_TASKBAR_SMALL));
+    if (IsDlgButtonChecked(dlg, IDC_TASKBAR_COLUMNS))
+        PreviewColumns(dc, &d, bar.top, IsDlgButtonChecked(dlg, IDC_TASKBAR_SMALL));
+    else
+        PreviewMenu(dc, &d, bar.top, IsDlgButtonChecked(dlg, IDC_TASKBAR_SMALL));
     if (!hide) {
         SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
         SetRect(&b, bar.left + 2, bar.top + 4, bar.left + 56, bar.bottom - 2);
@@ -319,8 +370,6 @@ static void Apply24Hour(BOOL on)
 /* ---- Tray ---- */
 
 #define ROW_H   18
-#define MAX_TRAY    6
-#define MAX_HIDDEN  16
 
 static void LoadList(HWND dlg, int id, LPCSTR section, int max)
 {
@@ -402,7 +451,7 @@ static void DrawProgram(const DRAWITEMSTRUCT FAR *d)
     DisplayNameOfFile(PathFileName(path), name);
     if (*PathExtension(name))
         *PathExtension(name) = '\0';
-    PaintListItem(d, d->rcItem.left + 2, IconForFile(path, FALSE), name);
+    PaintListItem(d, d->rcItem.left + 2, IconForFile(path, FALSE), name, FALSE);
 }
 
 static void Apply(HWND dlg)
@@ -413,6 +462,7 @@ static void Apply(HWND dlg)
     SettingsSetInt(SECTION, "Clock", IsDlgButtonChecked(dlg, IDC_TASKBAR_CLOCK));
     SettingsSetInt(SECTION, "IconsOnly", IsDlgButtonChecked(dlg, IDC_TASKBAR_ICONSONLY));
     SettingsSetInt(SECTION, "Group", IsDlgButtonChecked(dlg, IDC_TASKBAR_GROUPED));
+    SettingsSetInt(SECTION, "TwoColumns", IsDlgButtonChecked(dlg, IDC_TASKBAR_COLUMNS));
     Apply24Hour(IsDlgButtonChecked(dlg, IDC_TASKBAR_24HOUR));
     SaveList(dlg, IDC_TRAY_LIST, "Tray");
     SaveList(dlg, IDC_HIDE_LIST, "Hidden");
@@ -420,11 +470,69 @@ static void Apply(HWND dlg)
     EnableWindow(GetDlgItem(dlg, IDC_APPLY), FALSE);
 }
 
-BOOL CALLBACK __export TaskbarPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+/* The sheet's buttons, check boxes and lists. */
+static void Command(HWND dlg, WPARAM wp, LPARAM lp)
 {
     char dir[MAX_PATH];
-    PAINTSTRUCT ps;
     RECT r;
+
+    switch (wp) {
+    case IDC_TABS:
+        if (HIWORD(lp) == TCN_SELECT)
+            TabsShowPage(dlg, TabsSelected(GetDlgItem(dlg, IDC_TABS)), NotPicture);
+        break;
+    case IDC_TASKBAR_ONTOP:
+    case IDC_TASKBAR_AUTOHIDE:
+    case IDC_TASKBAR_SMALL:
+    case IDC_TASKBAR_CLOCK:
+    case IDC_TASKBAR_24HOUR:
+    case IDC_TASKBAR_ICONSONLY:
+    case IDC_TASKBAR_GROUPED:
+    case IDC_TASKBAR_COLUMNS:
+        EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_24HOUR), IsDlgButtonChecked(dlg, IDC_TASKBAR_CLOCK));
+        EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_CUSTOMIZE), IsDlgButtonChecked(dlg, IDC_TASKBAR_COLUMNS));
+        EnableWindow(GetDlgItem(dlg, IDC_APPLY), TRUE);
+        DlgRect(dlg, IDC_TASKBAR_PREVIEW, &r);
+        InvalidateRect(dlg, &r, FALSE);
+        break;
+    case IDC_TASKBAR_CUSTOMIZE:
+        StartMenuSizeShow(dlg);
+        break;
+    case IDC_TASKBAR_ADD:
+        DialogBox(g_hInst, MAKEINTRESOURCE(IDD_NEWSHORTCUT), dlg, TaskbarPropertiesWizardProc);
+        break;
+    case IDC_TASKBAR_REMOVE:
+        DialogBox(g_hInst, MAKEINTRESOURCE(IDD_REMOVESC), dlg, TaskbarPropertiesRemoveProc);
+        break;
+    case IDC_TASKBAR_ADVANCED:
+        StartMenuFolder(dir);
+        FolderWindowExplore(dir);
+        break;
+    case IDC_TASKBAR_SYNC:
+        ProgramManagerSync(dlg);
+        break;
+    case IDC_TRAY_ADD:    AddProgram(dlg, IDC_TRAY_LIST); break;
+    case IDC_TRAY_REMOVE: RemoveProgram(dlg, IDC_TRAY_LIST); break;
+    case IDC_HIDE_ADD:    AddProgram(dlg, IDC_HIDE_LIST); break;
+    case IDC_HIDE_REMOVE: RemoveProgram(dlg, IDC_HIDE_LIST); break;
+    case IDC_TRAY_LIST:
+    case IDC_HIDE_LIST:
+        if (HIWORD(lp) == LBN_SELCHANGE)
+            Buttons(dlg);
+        break;
+    case IDC_TASKBAR_CLEAR:
+        RecentClear();
+        SetFocus(GetDlgItem(dlg, IDC_TASKBAR_ADD));
+        EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_CLEAR), FALSE);
+        break;
+    default:
+        SheetButton(dlg, wp, Apply);
+    }
+}
+
+BOOL CALLBACK __export TaskbarPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+    PAINTSTRUCT ps;
 
     switch (msg) {
     case WM_INITDIALOG:
@@ -441,8 +549,10 @@ BOOL CALLBACK __export TaskbarPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         CheckDlgButton(dlg, IDC_TASKBAR_CLOCK, SettingsGetInt(SECTION, "Clock", 1));
         CheckDlgButton(dlg, IDC_TASKBAR_ICONSONLY, SettingsGetInt(SECTION, "IconsOnly", 0));
         CheckDlgButton(dlg, IDC_TASKBAR_GROUPED, SettingsGetInt(SECTION, "Group", 0));
+        CheckDlgButton(dlg, IDC_TASKBAR_COLUMNS, SettingsGetInt(SECTION, "TwoColumns", 0));
         CheckDlgButton(dlg, IDC_TASKBAR_24HOUR, GetProfileInt("intl", "iTime", 0) != 0);
         EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_24HOUR), IsDlgButtonChecked(dlg, IDC_TASKBAR_CLOCK));
+        EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_CUSTOMIZE), IsDlgButtonChecked(dlg, IDC_TASKBAR_COLUMNS));
         EnableWindow(GetDlgItem(dlg, IDC_APPLY), FALSE);
         EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_CLEAR), !RecentIsEmpty());
         SendDlgItemMessage(dlg, IDC_TASKBAR_ICON, STM_SETICON, (WPARAM)IconStock(IDI_SM_PROGRAMS), 0L);
@@ -466,50 +576,7 @@ BOOL CALLBACK __export TaskbarPropertiesProc(HWND dlg, UINT msg, WPARAM wp, LPAR
         DrawProgram((const DRAWITEMSTRUCT FAR *)lp);
         return TRUE;
     case WM_COMMAND:
-        switch (wp) {
-        case IDC_TABS:
-            if (HIWORD(lp) == TCN_SELECT)
-                TabsShowPage(dlg, TabsSelected(GetDlgItem(dlg, IDC_TABS)), NotPicture);
-            break;
-        case IDC_TASKBAR_ONTOP:
-        case IDC_TASKBAR_AUTOHIDE:
-        case IDC_TASKBAR_SMALL:
-        case IDC_TASKBAR_CLOCK:
-        case IDC_TASKBAR_24HOUR:
-        case IDC_TASKBAR_ICONSONLY:
-        case IDC_TASKBAR_GROUPED:
-            EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_24HOUR), IsDlgButtonChecked(dlg, IDC_TASKBAR_CLOCK));
-            EnableWindow(GetDlgItem(dlg, IDC_APPLY), TRUE);
-            DlgRect(dlg, IDC_TASKBAR_PREVIEW, &r);
-            InvalidateRect(dlg, &r, FALSE);
-            break;
-        case IDC_TASKBAR_ADD:
-            DialogBox(g_hInst, MAKEINTRESOURCE(IDD_NEWSHORTCUT), dlg, TaskbarPropertiesWizardProc);
-            break;
-        case IDC_TASKBAR_REMOVE:
-            DialogBox(g_hInst, MAKEINTRESOURCE(IDD_REMOVESC), dlg, TaskbarPropertiesRemoveProc);
-            break;
-        case IDC_TASKBAR_ADVANCED:
-            StartMenuFolder(dir);
-            FolderWindowExplore(dir);
-            break;
-        case IDC_TRAY_ADD:    AddProgram(dlg, IDC_TRAY_LIST); break;
-        case IDC_TRAY_REMOVE: RemoveProgram(dlg, IDC_TRAY_LIST); break;
-        case IDC_HIDE_ADD:    AddProgram(dlg, IDC_HIDE_LIST); break;
-        case IDC_HIDE_REMOVE: RemoveProgram(dlg, IDC_HIDE_LIST); break;
-        case IDC_TRAY_LIST:
-        case IDC_HIDE_LIST:
-            if (HIWORD(lp) == LBN_SELCHANGE)
-                Buttons(dlg);
-            break;
-        case IDC_TASKBAR_CLEAR:
-            RecentClear();
-            SetFocus(GetDlgItem(dlg, IDC_TASKBAR_ADD));
-            EnableWindow(GetDlgItem(dlg, IDC_TASKBAR_CLEAR), FALSE);
-            break;
-        default:
-            SheetButton(dlg, wp, Apply);
-        }
+        Command(dlg, wp, lp);
         return TRUE;
     case WM_DESTROY:
         MessageLoopTrackDialog(dlg, FALSE);

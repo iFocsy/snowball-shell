@@ -80,13 +80,56 @@ void IconsForget(LPCSTR key)
         }
 }
 
+/* The desktop's icons a theme gives (SNOWBALL.INI [Icons] key=file,index),
+   read once; those of an earlier theme are kept: windows may show them yet. */
+static const struct { int id; LPCSTR key; } themed[] = {
+    { IDI_COMPUTER, "Computer" }, { IDI_MYDOCS, "Documents" }, { IDI_BIN, "BinEmpty" }, { IDI_BINFULL, "BinFull" },
+};
+#define NTHEMED     (sizeof themed / sizeof themed[0])
+static HICON own[NTHEMED];
+static BOOL ownRead;
+
+void IconsThemeChanged(void)
+{
+    ownRead = FALSE;
+}
+
+static HICON Themed(int id)
+{
+    char value[MAX_PATH + 8];
+    int i, index;
+
+    if (!ownRead) {
+        ownRead = TRUE;
+        for (i = 0; i < NTHEMED; i++) {
+            own[i] = NULL;
+            SettingsGetString("Icons", themed[i].key, "", value, sizeof value);
+            if (*value) {
+                index = ThemeManagerIconIndex(value);
+                DosShortPath(value, value);
+                if ((UINT)(own[i] = ExtractIcon(g_hInst, value, index)) <= 1)
+                    own[i] = NULL;
+            }
+        }
+    }
+    for (i = 0; i < NTHEMED; i++)
+        if (themed[i].id == id)
+            return own[i];
+    return NULL;
+}
+
 HICON IconStock(int id)
 {
-    static BOOL imaged[IDI_LAST + 1];
-    HICON icon = LoadIcon(g_hArt, MAKEINTRESOURCE(id));
+    static BYTE imaged[IDI_ART_LAST / 8 + 1];    /* a bit each: its own images registered */
+    HICON icon = Themed(id);
 
-    if (icon && id <= IDI_LAST && !imaged[id])
-        imaged[id] = DrawIconImages(icon, g_hArt, MAKEINTRESOURCE(id));
+    if (icon)
+        return icon;
+    icon = LoadIcon(g_hArt, MAKEINTRESOURCE(id));
+
+    if (icon && id <= IDI_ART_LAST && !(imaged[id / 8] & (1 << (id % 8))) &&
+        DrawIconImages(icon, g_hArt, MAKEINTRESOURCE(id)))
+        imaged[id / 8] |= (BYTE)(1 << (id % 8));
     return icon;
 }
 
@@ -96,6 +139,8 @@ static HICON Extract(LPCSTR file, int index)
     char shortPath[MAX_PATH];
     HICON h;
 
+    if (nIcons == MAX_ICONS)            /* full: an icon not kept would never be freed (a stock one stands in) */
+        return NULL;
     DosShortPath(file, shortPath);
     h = ExtractIcon(g_hInst, shortPath, index);
     return (UINT)h > 1 ? h : NULL;
@@ -146,7 +191,7 @@ HICON IconForFile(LPCSTR path, BOOL isDir)
 
 HICON IconForShortcut(LPCSTR shcPath)
 {
-    static SHORTCUT s;                  /* large; one at a time */
+    SHORTCUT s;
     DWORD hash = Hash(shcPath);
     HICON h;
 
