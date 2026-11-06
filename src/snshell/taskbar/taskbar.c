@@ -412,6 +412,9 @@ static void Timer(HWND w, WPARAM id)
     case TIMER_OPEN:
         LaunchOpenRequest(w);
         break;
+    case TIMER_NET:
+        TrayNetTimer();
+        break;
     case TIMER_METER:
         TrayToolsTimer();
         break;
@@ -494,6 +497,7 @@ static void Destroy(HWND w)
     KillTimer(w, TIMER_SCAN);
     KillTimer(w, TIMER_HIDE);
     KillTimer(w, TIMER_OPEN);
+    TrayNetClose();
     HookRemove();
     PostQuitMessage(0);
 }

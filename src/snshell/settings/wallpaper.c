@@ -6,10 +6,19 @@
  * memory or runs again until the screen changes. Which picture and style it
  * was made from is kept in SNOWBALL.INI [Wallpaper], for Display Properties
  * and for making it again. If WIN.INI names another file, that one rules.
+ *
+ * Unless Setup was told otherwise ([Wallpaper] Managed=0) Snowball shows it, not
+ * Windows, which loads any wallpaper whole before the shell starts and keeps it:
+ * too much on a small machine, where the network then fails to start. So WIN.INI
+ * names none, [Wallpaper] Shown does, and a picture larger than its share of the
+ * memory is painted from a 256-colour file instead of being kept (draw.c's
+ * neighbour wallpaper.c in SNSYSTEM). A file another program put in WIN.INI is
+ * taken over at the next start.
  */
 #include "internal.h"
 
 #define SECTION     "Wallpaper"
+#define WALL_SHARE  6                   /* of the memory, at most: the rest is for the user's programs */
 
 static const char *const Names[WP_STYLES] = { "Fill", "Fit", "Stretch", "Tile", "Center" };
 static LPCSTR making;
@@ -20,6 +29,30 @@ void WallpaperStyles(HWND combo)
 
     for (i = 0; i < WP_STYLES; i++)
         SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)(LPSTR)Names[i]);
+}
+
+static BOOL Managed(void)
+{
+    return SettingsGetInt(SECTION, "Managed", 1);
+}
+
+/* The file shown: Snowball's, or what WIN.INI names. */
+void WallpaperShown(LPSTR out, int size)
+{
+    *out = '\0';
+    if (Managed())
+        SettingsGetString(SECTION, "Shown", "", out, size);
+    if (!*out)
+        GetProfileString("Desktop", "Wallpaper", "", out, size);
+}
+
+BOOL WallpaperTiled(void)
+{
+    char shown[MAX_PATH];
+
+    if (Managed() && (SettingsGetString(SECTION, "Shown", "", shown, sizeof shown), *shown))
+        return SettingsGetInt(SECTION, "Tile", 0);
+    return GetProfileInt("Desktop", "TileWallpaper", 0);
 }
 
 static void MadePath(LPSTR out)
@@ -55,7 +88,7 @@ int WallpaperNow(LPSTR path)
 {
     char shown[MAX_PATH];
 
-    GetProfileString("Desktop", "Wallpaper", "(None)", shown, sizeof shown);
+    WallpaperShown(shown, sizeof shown);
     *path = '\0';
     if (IsMade(shown)) {
         SettingsGetString(SECTION, "Source", "", path, MAX_PATH);
@@ -70,7 +103,7 @@ int WallpaperNow(LPSTR path)
             lstrcpy(path, shown);
         }
     }
-    return GetProfileInt("Desktop", "TileWallpaper", 0) ? WP_TILE : WP_CENTER;
+    return WallpaperTiled() ? WP_TILE : WP_CENTER;
 }
 
 /* A BMP within the screen, centred or tiled, is Windows' own to show. One
@@ -107,7 +140,7 @@ int WallpaperPreview(LPCSTR path, int style, int width, IMAGEPROGRESS progress, 
     IMAGEJOB job;
     char     made[MAX_PATH], shown[MAX_PATH];
 
-    GetProfileString("Desktop", "Wallpaper", "", shown, sizeof shown);
+    WallpaperShown(shown, sizeof shown);
     if (IsMade(shown) && IsInUse(path, style)) {
         MadePath(made);
         if (DibLoad(made, d))
@@ -164,14 +197,73 @@ static int Make(HWND owner, LPCSTR path, int style, LPCSTR made)
     return r;
 }
 
+/* Would this picture, as a bitmap of the screen, stay within its share of the memory? */
+static BOOL Fits(int w, int h)
+{
+    return (DWORD)w * h * ScreenDepth() / 8 / 1024 <= WallpaperMemoryKB() / WALL_SHARE;
+}
+
+/* The 256-colour copy of a picture, made once. */
+static BOOL LowCopy(LPCSTR shown, LPSTR low)
+{
+    char made[MAX_PATH];
+    OFSTRUCT of;
+    HCURSOR cursor;
+    BOOL done;
+
+    lstrcpy(low, g_home);
+    PathAppend(low, "WALLLOW.BMP");
+    SettingsGetString(SECTION, "Low", "", made, sizeof made);
+    if (!lstrcmpi(made, shown) && OpenFile(low, &of, OF_EXIST) != HFILE_ERROR)
+        return TRUE;
+    cursor = SetCursor(LoadCursor(NULL, IDC_WAIT));
+    done = WallpaperMakeLow(shown, low);
+    SetCursor(cursor);
+    if (done)
+        SettingsSetString(SECTION, "Low", shown);
+    return done;
+}
+
+/* SNSYSTEM told how to show what [Wallpaper] Shown names. */
+static void Display(void)
+{
+    char shown[MAX_PATH], low[MAX_PATH];
+    BOOL tile = WallpaperTiled();
+    int w, h, depth;
+
+    SettingsGetString(SECTION, "Shown", "", shown, sizeof shown);
+    if (!*shown || !DrawWallpaperInfo(shown, &w, &h, &depth)) {
+        DrawWallpaperUse(NULL, FALSE, FALSE);
+        return;
+    }
+    if (Fits(w, h) && DrawWallpaperUse(shown, TRUE, tile))
+        return;
+    if (depth > 8 && LowCopy(shown, low))
+        DrawWallpaperUse(low, FALSE, tile);
+    else
+        DrawWallpaperUse(shown, FALSE, tile);
+}
+
 static void Show(LPCSTR path, BOOL tile)
 {
     char brief[MAX_PATH];
+    int w, h, depth;
 
     if (*path)
         DosShortPath(path, brief);
-    WriteProfileString("Desktop", "TileWallpaper", tile ? "1" : "0");
-    SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, *path ? (LPSTR)brief : (LPSTR)"(None)", SPIF_UPDATEINIFILE);
+    if (Managed() && (!*path || DrawWallpaperInfo(brief, &w, &h, &depth))) {
+        SettingsSetString(SECTION, "Shown", *path ? (LPCSTR)brief : NULL);
+        SettingsSetInt(SECTION, "Tile", tile);
+        SettingsSetString(SECTION, "Low", NULL);
+        WriteProfileString("Desktop", "TileWallpaper", "0");
+        SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, (LPSTR)"(None)", SPIF_UPDATEINIFILE);
+        Display();
+    } else {                            /* compressed, or of OS/2: Windows' to show */
+        SettingsSetString(SECTION, "Shown", NULL);
+        DrawWallpaperUse(NULL, FALSE, FALSE);
+        WriteProfileString("Desktop", "TileWallpaper", tile ? "1" : "0");
+        SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, *path ? (LPSTR)brief : (LPSTR)"(None)", SPIF_UPDATEINIFILE);
+    }
     DesktopRepaint();
 }
 
@@ -251,12 +343,12 @@ void DisplayPropertiesDesktop(HDC dc, const RECT *s, COLORREF desktop, const DIB
 }
 
 /* After the screen changed: made again for it, if its picture is still there. */
-void WallpaperCheck(void)
+static void Check(void)
 {
     char path[MAX_PATH], shown[MAX_PATH], was[32], now[32];
     int  style, w, h;
 
-    GetProfileString("Desktop", "Wallpaper", "", shown, sizeof shown);
+    WallpaperShown(shown, sizeof shown);
     if (!IsMade(shown))
         return;
     SettingsGetString(SECTION, "Made", "", was, sizeof was);
@@ -266,4 +358,58 @@ void WallpaperCheck(void)
     style = WallpaperNow(path);
     if (*path && ImageSize(path, &w, &h) == IMAGE_OK)
         WallpaperApply(NULL, path, style);
+}
+
+/* Windows has loaded what WIN.INI names by now: Snowball takes it, and frees Windows' copy. */
+static void TakeOver(void)
+{
+    char named[MAX_PATH], path[MAX_PATH];
+    int w, h, depth;
+
+    GetProfileString("Desktop", "Wallpaper", "", named, sizeof named);
+    if (!*named || !lstrcmpi(named, "(None)"))
+        return;
+    if (_fstrchr(named, '\\')) {
+        lstrcpy(path, named);
+    } else {
+        GetWindowsDirectory(path, sizeof path);
+        PathAppend(path, named);
+    }
+    if (!DrawWallpaperInfo(path, &w, &h, &depth)) {
+        SettingsSetString(SECTION, "Shown", NULL);
+        return;
+    }
+    SettingsSetString(SECTION, "Shown", path);
+    SettingsSetInt(SECTION, "Tile", GetProfileInt("Desktop", "TileWallpaper", 0));
+    SettingsSetString(SECTION, "Low", NULL);
+    WriteProfileString("Desktop", "TileWallpaper", "0");
+    SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, (LPSTR)"(None)", SPIF_UPDATEINIFILE);
+}
+
+/* Setup was told Snowball no longer shows it: WIN.INI names it again. */
+static void GiveBack(void)
+{
+    char shown[MAX_PATH];
+
+    SettingsGetString(SECTION, "Shown", "", shown, sizeof shown);
+    if (!*shown)
+        return;
+    WriteProfileString("Desktop", "TileWallpaper", SettingsGetInt(SECTION, "Tile", 0) ? "1" : "0");
+    SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, shown, SPIF_UPDATEINIFILE);
+    SettingsSetString(SECTION, "Shown", NULL);
+    SettingsSetString(SECTION, "Tile", NULL);
+    SettingsSetString(SECTION, "Low", NULL);
+}
+
+void WallpaperStart(void)
+{
+    if (!Managed()) {
+        GiveBack();
+        Check();
+        return;
+    }
+    TakeOver();
+    Check();
+    Display();
+    DesktopRepaint();
 }

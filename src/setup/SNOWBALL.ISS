@@ -16,7 +16,7 @@
 [Setup]
 Bits=16
 AppName=Snowball
-AppVerName=Snowball v20261105
+AppVerName=Snowball v20261106
 AppCopyright=Snowball: a rewrite of Calmira Reborn, under the GNU GPL 3
 MinVersion=3.1,0
 DefaultDirName={win}\SHELL

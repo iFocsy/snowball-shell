@@ -3,8 +3,8 @@
 #include <ver.h>
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     2026, 11, 5, 0
-PRODUCTVERSION  2026, 11, 5, 0
+FILEVERSION     2026, 11, 6, 0
+PRODUCTVERSION  2026, 11, 6, 0
 FILEFLAGSMASK   0
 FILEFLAGS       0
 FILEOS          VOS_DOS_WINDOWS16
@@ -16,11 +16,11 @@ BEGIN
         BLOCK "040904E4"
         BEGIN
             VALUE "FileDescription", VER_DESCRIPTION
-            VALUE "FileVersion",     "v20261105\0"
+            VALUE "FileVersion",     "v20261106\0"
             VALUE "InternalName",    VER_NAME
             VALUE "OriginalFilename",VER_FILE
             VALUE "ProductName",     "Snowball\0"
-            VALUE "ProductVersion",  "v20261105\0"
+            VALUE "ProductVersion",  "v20261106\0"
         END
     END
     BLOCK "VarFileInfo"

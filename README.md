@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v20261105-1084D0" alt="Version v20261105">
+  <img src="https://img.shields.io/badge/version-v20261106-1084D0" alt="Version v20261106">
   <img src="https://img.shields.io/badge/Windows-3.1%20%7C%203.11-008080" alt="Windows 3.1 and 3.11">
   <img src="https://img.shields.io/badge/C-Open%20Watcom%202-555555" alt="C, Open Watcom 2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-000080" alt="GPL 3 license"></a>
@@ -54,8 +54,11 @@ It runs on real hardware, from a 386 up, and in emulators such as DOSBox-X.
   Recycle Bin, Undo, Send To, Find and Properties.
 - **Themes.** A Theme Manager in the style of Windows 98's Desktop Themes, with colours, JPEG or PNG wallpaper, screen saver,
   sounds, mouse pointers and desktop icons, and 60 colour schemes including light, colourful and dark ones.
+- **Network.** A tray icon and a status window as on Windows XP: connected or not, traffic, addresses and the card, for
+  any card with Microsoft TCP/IP-32, with Network Properties to set the address, DNS and the card's interrupt and I/O address.
 - **Light on resources.** Written against the Windows 3.1 API with no class library in between: smaller than
-  Calmira, and it leaves more of Windows' scarce USER and GDI space free.
+  Calmira, and it leaves more of Windows' scarce USER and GDI space free. A wallpaper is kept to a sixth of the memory:
+  past that it is painted from disk, so even 4 MB machines can have a wallpaper and a network.
 
 ---
 
@@ -85,13 +88,13 @@ program.
 
 | Part | Snowball | Size | Calmira | Size |
 |:---|:---|---:|:---|---:|
-| The shell | SNOWBALL.EXE and SNSHELL.DLL | 415 KB | CALMIRA.EXE | 1,229 KB |
-| Loaded into every program | SNSYSTEM.DLL | 38 KB | WNDHOOKS.DLL | 5 KB |
+| The shell | SNOWBALL.EXE and SNSHELL.DLL | 446 KB | CALMIRA.EXE | 1,229 KB |
+| Loaded into every program | SNSYSTEM.DLL | 40 KB | WNDHOOKS.DLL | 5 KB |
 | Long file names | LFN.DRV (optional) | 7 KB | LFNFUNCS.DLL | 191 KB |
 | Resource extensions | USERX.DRV, GDIX.DRV (optional) | 15 KB | none | |
 | Helpers | OPEN.COM | 3 KB | CTASKMAN.EXE, EXPLORER.EXE, SCRNSAVE.EXE, SHOWDESK.EXE | 60 KB |
 | Icons and pictures | W98ART.DLL, 258 icons | 429 KB | inside CALMIRA.EXE | |
-| **Total** | | **907 KB** | | **1,485 KB** |
+| **Total** | | **940 KB** | | **1,485 KB** |
 
 ### Running
 
@@ -121,7 +124,7 @@ Snowball covers the whole Windows 98 desktop. The full list, each feature with a
 | Area | What is there |
 |:---|:---|
 | [Desktop and Appearance](docs/FEATURES.md#desktop-and-appearance) | The Windows 98 look for every program, Display Properties, JPEG and PNG wallpapers, the Theme Manager, 60 colour schemes |
-| [Taskbar and Start Menu](docs/FEATURES.md#taskbar-and-start-menu) | Taskbar on any edge, Quick Launch, tray, classic and two-column Start menus, Alt+Tab, Task Manager |
+| [Taskbar and Start Menu](docs/FEATURES.md#taskbar-and-start-menu) | Taskbar on any edge, Quick Launch, tray with network status, classic and two-column Start menus, Alt+Tab, Task Manager |
 | [Folders and Explorer](docs/FEATURES.md#folders-and-explorer) | Toolbars and address bar, five views, the folder tree, My Computer's tiles, Folder Options, Find |
 | [Files](docs/FEATURES.md#files) | Copy and move, Recycle Bin, Undo, Send To, shortcuts, Properties, Quick View, Disk Cleanup |
 | [Programs and Windows](docs/FEATURES.md#programs-and-windows) | Windows 98's Open and Save As, MS-DOS Prompt in a window, Program Manager's groups, setup |
@@ -133,7 +136,7 @@ Snowball covers the whole Windows 98 desktop. The full list, each feature with a
 Three optional drivers come with Snowball, as components of its Setup: long file names for Windows
 programs, and two extensions that leave more USER and GDI resources free for every program. With 24
 Explorer windows open, USER stays at 68% free instead of 25%. They are described in
-**[docs/DRIVERS.md](docs/DRIVERS.md)**.
+**[docs/DRIVERS.md](docs/DRIVERS.md)**, with what the network tray needs from Windows.
 
 ---
 
@@ -162,7 +165,7 @@ You need Windows with PowerShell. The tools are found where they are usually ins
 into `build-tools\`: Open Watcom 2 for the code, Inno Setup 1.2.16 and winevdm for the setup.
 
 ```powershell
-.\bumpversion.ps1  # a new version (today's date, such as v20261105) everywhere it is written
+.\bumpversion.ps1  # a new version (today's date, such as v20261106) everywhere it is written
 .\build.ps1        # SNOWBALL.EXE, SNSHELL.DLL, SNSYSTEM.DLL and the rest, in release\
 .\makesetup.ps1    # setup\SNOWSET.EXE
 .\unittest.ps1     # the core's checks, in under a second
@@ -179,8 +182,6 @@ the sources have changes not committed yet).
 |:-:|:---|:---|:-:|
 | 1 | Control Panel as a folder | Control Panel's applets as icons in a folder window, as Windows 98 shows them | Idea |
 | 2 | Network Neighborhood | Windows for Workgroups' shared folders and printers on the desktop and in Explorer | Idea |
-| 3 | Window previews | A small picture of each window in a group's list on the taskbar | Idea |
-| 4 | Mounting from the shell | Host folders and disk images mounted from Snowball itself | Idea |
 
 ---
 

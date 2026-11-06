@@ -244,6 +244,8 @@ ENTRY far *StartMenuSettingsItem(HMENU root)
     if ((i = StartMenuProgram(m, "&Printers", "PRINTMAN.EXE")) != NULL) StartMenuAppend(i);
     /* WINSETUP.EXE: Setup inside Windows (SETUP.EXE is the DOS one: no use with Windows running) */
     if (WindowsHas("WINSETUP.EXE") && (i = StartMenuProgram(m, "Windows &Setup", "WINSETUP.EXE")) != NULL) StartMenuAppend(i);
+    if (NetPropertiesAvailable())       /* here too: a card that failed has no tray icon */
+        Special(m, "&Network...", IDI_NETWORK, SPECIAL_NETWORK);
     Special(m, "&Taskbar && Start Menu...", IDI_SNOWBALL, SPECIAL_TASKBAR);
     Special(m, "&Folder Options...", IDI_FOLDER, SPECIAL_FOLDEROPTS);
     Special(m, "T&heme Manager...", IDI_DISPLAY, SPECIAL_THEMES);
@@ -561,6 +563,7 @@ static void Command(int i)
     case SPECIAL_TASKBAR:  TaskbarPropertiesShow(); break;
     case SPECIAL_FOLDEROPTS: FolderOptionsShow(NULL); break;
     case SPECIAL_THEMES:   ThemeManagerShow(); break;
+    case SPECIAL_NETWORK:  NetPropertiesShow(StartMenuOwner); break;
     case SPECIAL_COMPUTER: FolderWindowOpen(""); break;
     default:               if (e->path) LaunchItem(StartMenuOwner, e->path);
     }

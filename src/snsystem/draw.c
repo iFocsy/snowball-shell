@@ -6,6 +6,7 @@
 #define STRIP_BYTES 8192                /* a strip's colours, about */
 
 static HFONT fonts[2];
+static long offscreenLimit;
 
 /* Images of icons at 16 or 32 pixels: colour (black where transparent) and
    mask (1 where transparent), each in a slot of a strip of one size: a pair
@@ -187,11 +188,20 @@ void SNSYSTEM_API DrawTextEllipsis(HDC dc, LPCSTR text, RECT FAR *r, UINT align)
     DrawText(dc, buf, -1, r, align | DT_SINGLELINE | DT_VCENTER);
 }
 
+/* Past this many pixels (0: none) painting goes straight to the window: a
+   screen's worth of off-screen bitmap is what a small machine cannot spare. */
+void SNSYSTEM_API DrawOffscreenLimit(long pixels)
+{
+    offscreenLimit = pixels;
+}
+
 HDC SNSYSTEM_API DrawOffscreenBegin(OFFSCREEN FAR *o, HDC dc, const RECT FAR *r)
 {
     o->dc = dc;
     o->r = *r;
     o->mem = NULL;
+    if (offscreenLimit && (long)(r->right - r->left) * (r->bottom - r->top) > offscreenLimit)
+        return dc;
     if (r->right > r->left && r->bottom > r->top && (o->mem = CreateCompatibleDC(dc)) != NULL) {
         if ((o->bmp = CreateCompatibleBitmap(dc, r->right - r->left, r->bottom - r->top)) != NULL) {
             o->old = SelectObject(o->mem, o->bmp);
@@ -213,18 +223,6 @@ void SNSYSTEM_API DrawOffscreenEnd(OFFSCREEN FAR *o)
     SelectObject(o->mem, o->old);
     DeleteObject(o->bmp);
     DeleteDC(o->mem);
-}
-
-/* Windows 3.1 has no PaintDesktop: the desktop window paints its pattern
-   and wallpaper into our DC (for windows placed at the screen origin).
-   Its procedure is called, not sent to: the desktop window belongs to the
-   active task, and what is sent to a task that is ending is lost, which
-   left an off-screen bitmap as it came, whatever was in that memory. */
-void SNSYSTEM_API DrawWallpaper(HDC dc)
-{
-    HWND desktop = GetDesktopWindow();
-
-    CallWindowProc((FARPROC)GetWindowLong(desktop, GWL_WNDPROC), desktop, WM_ERASEBKGND, (WPARAM)dc, 0L);
 }
 
 /* ---- icons ----

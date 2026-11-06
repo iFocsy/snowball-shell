@@ -34,7 +34,7 @@ typedef struct {
 enum { TRACK_CLOSED, TRACK_ITEM, TRACK_DROP };
 enum { BAND_NONE, BAND_HEAD, BAND_FOOT };
 enum { SPECIAL_NONE, SPECIAL_RUN, SPECIAL_SHUTDOWN, SPECIAL_FIND, SPECIAL_TASKBAR, SPECIAL_FOLDEROPTS,
-       SPECIAL_COMPUTER, SPECIAL_THEMES };                /* an item that is none of the files */
+       SPECIAL_COMPUTER, SPECIAL_THEMES, SPECIAL_NETWORK };                /* an item that is none of the files */
 
 typedef struct {                /* what an opening ended with */
     int      what;              /* TRACK_* */

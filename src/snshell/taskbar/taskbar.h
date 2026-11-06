@@ -21,6 +21,8 @@ void   TaskbarDragOver(const POINT FAR *screen);  /* a drag is there (NULL: ende
                                                      button brings its window forward */
 void   TaskbarDropOnTask(HWND owner, HWND task, HDROP drop);  /* NULL drop: only says it cannot */
 void   TaskbarApply(void);                        /* after Taskbar Properties */
+BOOL   NetPropertiesAvailable(void);              /* TCP/IP is set up with a card */
+void   NetPropertiesShow(HWND owner);
 void   TaskbarResourceMeter(void);                /* System Tools' Resource Meter: in the tray */
 #define MAX_TRAY        6               /* [Tray]: programs shown by the clock */
 #define MAX_HIDDEN      16              /* [Hidden]: programs with no button */

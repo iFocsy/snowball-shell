@@ -351,6 +351,27 @@ static PART parts[] = {
 #define PARTS       ((int)(sizeof parts / sizeof parts[0]))
 #define PART_LFN    0
 
+static BOOL wallpaper;                  /* Snowball shows it: [Wallpaper] Managed */
+
+static void SettingsFile(LPSTR out)
+{
+    lstrcpy(out, app);
+    lstrcat(out, "SNOWBALL.INI");
+}
+
+/* What Snowball showed goes back to Windows: WIN.INI names it again. */
+static void GiveBackWallpaper(void)
+{
+    char ini[MAX_PATH], shown[MAX_PATH];
+
+    SettingsFile(ini);
+    if (!GetPrivateProfileString("Wallpaper", "Shown", "", shown, sizeof shown, ini))
+        return;
+    WriteProfileString("Desktop", "Wallpaper", shown);
+    WriteProfileString("Desktop", "TileWallpaper", GetPrivateProfileInt("Wallpaper", "Tile", 0, ini) ? "1" : "0");
+    WritePrivateProfileString("Wallpaper", "Shown", NULL, ini);
+}
+
 BOOL FAR PASCAL __export ComponentsProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     RECT r;
@@ -362,6 +383,7 @@ BOOL FAR PASCAL __export ComponentsProc(HWND dlg, UINT msg, WPARAM wParam, LPARA
         SetWindowPos(dlg, NULL, (GetSystemMetrics(SM_CXSCREEN) - (r.right - r.left)) / 2,
                      (GetSystemMetrics(SM_CYSCREEN) - (r.bottom - r.top)) / 2, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
         CheckDlgButton(dlg, IDC_SHELLPART, 1);
+        CheckDlgButton(dlg, IDC_WALLPAPER, wallpaper);
         for (i = 0; i < PARTS; i++) {
             CheckDlgButton(dlg, parts[i].control, parts[i].chosen);
             EnableWindow(GetDlgItem(dlg, parts[i].control), parts[i].offered);
@@ -369,6 +391,7 @@ BOOL FAR PASCAL __export ComponentsProc(HWND dlg, UINT msg, WPARAM wParam, LPARA
         return TRUE;
     case WM_COMMAND:
         if (wParam == IDOK || wParam == IDCANCEL) {
+            wallpaper = IsDlgButtonChecked(dlg, IDC_WALLPAPER) != 0;
             for (i = 0; i < PARTS; i++)
                 parts[i].chosen = IsDlgButtonChecked(dlg, parts[i].control) != 0;
             EndDialog(dlg, 0);
@@ -381,7 +404,7 @@ BOOL FAR PASCAL __export ComponentsProc(HWND dlg, UINT msg, WPARAM wParam, LPARA
 
 static void InstallParts(LPCSTR sys)
 {
-    char value[256], from[MAX_PATH], to[MAX_PATH], text[100];
+    char value[256], from[MAX_PATH], to[MAX_PATH], text[100], ini[MAX_PATH];
     FARPROC proc;
     OFSTRUCT of;
     int i;
@@ -397,9 +420,14 @@ static void InstallParts(LPCSTR sys)
     }
     if (DosHasLongNames() && parts[PART_LFN].offered)
         parts[PART_LFN].chosen = TRUE;
+    SettingsFile(ini);
+    wallpaper = GetPrivateProfileInt("Wallpaper", "Managed", 1, ini) != 0;
     proc = MakeProcInstance((FARPROC)ComponentsProc, instance);
     DialogBox(instance, MAKEINTRESOURCE(IDD_COMPONENTS), NULL, (DLGPROC)proc);
     FreeProcInstance(proc);
+    /* Snowball acts on it at its next start: takes the wallpaper, or gives it back */
+    WritePrivateProfileString("Wallpaper", "Managed", wallpaper ? "1" : "0", ini);
+    WritePrivateProfileString(NULL, NULL, NULL, ini);
 
     for (i = 0; i < PARTS; i++) {
         PART *p = parts + i;
@@ -468,6 +496,7 @@ static void Uninstall(void)
     OFSTRUCT of;
     int i;
 
+    GiveBackWallpaper();
     Changes(TRUE, TRUE);
     for (i = 0; i < nChanges; i++) {
         CHANGE *c = changes + i;

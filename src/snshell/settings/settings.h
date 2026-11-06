@@ -30,8 +30,12 @@ void WallpaperStyles(HWND combo);                 /* the styles, in the order of
 int  WallpaperNow(LPSTR path);                    /* the picture chosen ("": none) and its style */
 BOOL WallpaperApply(HWND owner, LPCSTR path, int style);  /* FALSE: stopped, or it could not be done (said) */
 int  WallpaperPreview(LPCSTR path, int style, int width, IMAGEPROGRESS progress, DIB *d);
+void WallpaperShown(LPSTR out, int size);         /* the file shown, as WIN.INI would name it */
+BOOL WallpaperTiled(void);
+BOOL WallpaperMakeLow(LPCSTR source, LPCSTR target);  /* wallpaperlow.c: 256 colours */
+DWORD WallpaperMemoryKB(void);
 BOOL WallpaperYield(int percent);                 /* an IMAGEPROGRESS: other programs go on */
-void WallpaperCheck(void);                        /* at start: made again if the screen changed */
+void WallpaperStart(void);                        /* at start: taken over, shown; made again if the screen changed */
 
 void DisplayPropertiesDesktop(HDC dc, const RECT *s, COLORREF desktop, const DIB *wall, BOOL tile);  /* small */
 void DisplayPropertiesSavers(HWND combo, PATHLIST *l);    /* "(None)" (LIST_NONE) and each, data: its place in l */

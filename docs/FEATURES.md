@@ -83,6 +83,7 @@ Everything Snowball does, area by area. Features marked with \* are in Calmira t
 |:---|:---|
 | Desktop icons \* | My Computer, My Documents, the Recycle Bin, shortcuts and files, arranged by hand or by name |
 | Shadowed labels | White labels with a black shadow, readable on any wallpaper |
+| Wallpaper within memory | A wallpaper is kept to a sixth of the memory. Past that it is painted from disk in 256 colours, its own palette, and nothing of it stays in memory: 4 MB machines can have a wallpaper and a network. Setup can leave the wallpaper to Windows |
 | Right-click menu | Arrange Icons by name, type, size or date, Refresh, New, Paste, and the desktop's Properties |
 | Animations | Windows zoom to and from their taskbar buttons; the hidden taskbar slides in (Effects turns them off) |
 | Plain title bars on 256 colours | As Windows 98: gradients only where the screen has the colours for them |
@@ -150,6 +151,18 @@ Everything Snowball does, area by area. Features marked with \* are in Calmira t
     </td>
     <td><img src="../.github/images/date-time.png" alt="Date/Time Properties"></td>
   </tr>
+  <tr>
+    <td width="44%" valign="top">
+      <b>Network</b>
+      <p>Two computers in the tray, shown only with a network card that started. They light up with traffic, and carry a
+      red cross when not connected or a yellow mark with only a temporary address. A click shows the connection, how long
+      it has been up, packets and bytes, the addresses and the card.</p>
+      <p>Network Properties sets an automatic or fixed address, the gateway, DNS, and the card's interrupt and I/O address.
+      It is also in Start, Settings.</p>
+    </td>
+    <td><img src="../.github/images/network-status.png" alt="Network Status, General tab"><br><br>
+        <img src="../.github/images/network-properties.png" alt="Network Properties, IP Address tab"></td>
+  </tr>
 </table>
 
 | Feature | What it does |
@@ -162,6 +175,7 @@ Everything Snowball does, area by area. Features marked with \* are in Calmira t
 | Tray and clock | Chosen programs as icons in the tray; the clock's tooltip shows the date |
 | Resource Meter | The free System, User and GDI resources as three bars in the tray, with their details |
 | Volume | A speaker in the tray when the sound driver can set the volume: a slider and Mute |
+| Network | Two computers in the tray when a network card started and TCP/IP-32 runs: lit by traffic, marked when limited or not connected. Its status window has the connection, packets and bytes, the addresses and the card; Properties (also in Start, Settings) sets the address, DNS and the card's interrupt and I/O address |
 | Documents | The last 15 documents opened, from folders or the Run box |
 | Run \* | With AutoComplete of paths and programs |
 | Shut Down \* | Windows 98's Shut Down dialog |

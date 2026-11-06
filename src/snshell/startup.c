@@ -34,7 +34,7 @@ void StartupRun(LPCSTR cmdLine)
     DOSENTRY e;
     DOSFIND f;
 
-    WallpaperCheck();
+    WallpaperStart();
     if (*cmdLine)
         LaunchCommand(NULL, cmdLine, NULL, SW_SHOWNORMAL);
     if (GetAsyncKeyState(VK_SHIFT) < 0)     /* Shift held: skip, as in Windows */

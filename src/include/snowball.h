@@ -14,7 +14,7 @@
 #define SNOWBALL_H
 
 #define SB_NAME     "Snowball"
-#define SB_VERSION  "v20261105"
+#define SB_VERSION  "v20261106"
 
 #define MAX_PATH    260
 

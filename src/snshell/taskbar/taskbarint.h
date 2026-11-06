@@ -17,6 +17,7 @@
 #define TIMER_DRAG  6                   /* something dragged rests on a button? */
 #define TIMER_OPEN  7                   /* OPEN.COM's request from a DOS box? (each second) */
 #define TIMER_METER 8                   /* the Resource Meter read again */
+#define TIMER_NET   9                   /* the network: its traffic and whether it is connected */
 #define DRAG_MS     1000                /* ... this long: its window comes forward */
 #define SCAN_MS     10000               /* catch-up only: the hooks report changes */
 #define TIP_MS      600
@@ -104,5 +105,44 @@ void TrayToolsPaint(HDC dc, int i, const RECT *r);    /* i: from the first tool 
 void TrayToolsTip(int i, LPSTR out);
 void TrayToolsClick(int i);
 void TrayToolsMenu(int i);
+void TrayToolsRedrawNet(void);                    /* the network's icon alone */
+
+/* ---- netinfo.c: what the network software says of the card ---- */
+typedef struct {
+    char  card[48];
+    BYTE  mac[6];
+    DWORD speed;                                  /* bits a second */
+    DWORD address, mask, gateway;                 /* in network order; 0: none */
+    DWORD inBytes, outBytes, inPackets, outPackets;
+    BOOL  dhcp;                                   /* the address comes from the network */
+} NETINFO;
+
+BOOL NetInfoOpen(void);                           /* FALSE: no card that started */
+void NetInfoClose(void);
+BOOL NetInfoRead(NETINFO *n);
+BOOL NetInfoPing(DWORD address, WORD ms);         /* holds all of Windows meanwhile */
+
+/* ---- traynet.c: its tray icon ---- */
+#define NETS_ACQUIRING 0                          /* no address yet */
+#define NETS_CONNECTED 1
+#define NETS_LIMITED   2                          /* an address nobody gave it */
+#define NETS_DOWN      3
+
+BOOL  TrayNetShown(void);
+void  TrayNetLoad(void);
+void  TrayNetClose(void);
+void  TrayNetTimer(void);                         /* TIMER_NET */
+HICON TrayNetIcon(void);
+void  TrayNetTip(LPSTR out);
+void  TrayNetMenu(void);
+int   TrayNetState(void);
+LPCSTR TrayNetStateText(void);
+const NETINFO *TrayNetInfo(void);
+DWORD TrayNetSince(void);                         /* GetTickCount when it connected */
+
+/* ---- netstatus.c: its status window ---- */
+void NetStatusShow(void);
+void NetStatusRefresh(void);
+void NetAddressText(DWORD address, LPSTR out);
 
 #endif

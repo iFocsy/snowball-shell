@@ -34,7 +34,9 @@ void  SNSYSTEM_API DrawPreviewColors(const COLORREF FAR *sys, const COLORREF FAR
 void  SNSYSTEM_API DrawGroupFrame(HDC dc, const RECT FAR *r, int gap, RECT FAR *caption);
 void  SNSYSTEM_API DrawTextEllipsis(HDC dc, LPCSTR text, RECT FAR *r, UINT format);
 void  SNSYSTEM_API DrawWallpaper(HDC dc);                 /* for windows placed at (0,0) */
-/* Drawing off the screen: Begin gives a DC that draws, in dc's coordinates,
+BOOL  SNSYSTEM_API DrawWallpaperInfo(LPCSTR path, int FAR *w, int FAR *h, int FAR *depth);  /* FALSE: no plain BMP */
+BOOL  SNSYSTEM_API DrawWallpaperUse(LPCSTR path, BOOL inMemory, BOOL tile);  /* NULL: Windows' own */
+void  SNSYSTEM_API DrawOffscreenLimit(long pixels);/* Drawing off the screen: Begin gives a DC that draws, in dc's coordinates,
    into a bitmap of r (or dc itself, with no memory for one); End puts it on
    dc at once, so the screen never shows half a picture. */
 typedef struct { HDC dc, mem; HBITMAP bmp, old; RECT r; } OFFSCREEN;

@@ -3,7 +3,8 @@
  * Windows 98's: Resource Meter (the free System, User and GDI resources as
  * three bars; opened from System Tools, closed from its menu) and Volume
  * (when a sound card's driver can set it: a click shows its slider and
- * Mute), with Windows 98's icons (RSRCMTR.EXE's and SNDVOL32.EXE's, in W98ART.DLL).
+ * Mute), with Windows 98's icons (RSRCMTR.EXE's and SNDVOL32.EXE's, in W98ART.DLL);
+ * and the network's, in traynet.c.
  */
 #include "internal.h"
 #include "taskbarint.h"
@@ -27,13 +28,23 @@ static BOOL Muted(void)
 
 int TrayToolsCount(void)
 {
-    return meter + volume;
+    return meter + volume + TrayNetShown();
 }
 
-/* The tool at the tray's icon i (after the programs'): 0 the meter, 1 Volume. */
+/* The tool at the tray's icon i (after the programs'): 0 the meter, 1 Volume, 2 the network. */
 static int Tool(int i)
 {
-    return i == 0 && meter ? 0 : 1;
+    if (meter && i-- == 0)
+        return 0;
+    return volume && i == 0 ? 1 : 2;
+}
+
+void TrayToolsRedrawNet(void)
+{
+    RECT r;
+
+    TaskbarTrayIconRect(TaskbarNTray + meter + volume, &r);
+    InvalidateRect(g_taskbar, &r, FALSE);
 }
 
 /* TRUE when a figure changed. */
@@ -57,6 +68,7 @@ void TrayToolsLoad(void)
 
     meter = SettingsGetInt("Taskbar", "ResourceMeter", 0);
     volume = waveOutGetNumDevs() && !waveOutGetDevCaps(0, &caps, sizeof caps) && (caps.dwSupport & WAVECAPS_VOLUME);
+    TrayNetLoad();
     if (meter) {
         Read();
         SetTimer(g_taskbar, TIMER_METER, METER_MS, NULL);
@@ -89,13 +101,15 @@ void TrayToolsPaint(HDC dc, int i, const RECT *r)
 {
     int id = Tool(i) == 0 ? IDI_METER + (100 - min(level[0], 100)) * 12 / 100 : Muted() ? IDI_MUTED : IDI_SPEAKER;
 
-    DrawIconImage(dc, r->left, r->top, IconStock(id), TRUE);
+    DrawIconImage(dc, r->left, r->top, Tool(i) == 2 ? TrayNetIcon() : IconStock(id), TRUE);
 }
 
 void TrayToolsTip(int i, LPSTR out)
 {
     if (Tool(i) == 0)
         wsprintf(out, "System %u%%, User %u%%, GDI %u%% free", level[0], level[1], level[2]);
+    else if (Tool(i) == 2)
+        TrayNetTip(out);
     else
         lstrcpy(out, Muted() ? "Volume (muted)" : "Volume");
 }
@@ -246,6 +260,8 @@ void TrayToolsClick(int i)
 {
     if (Tool(i) == 0)
         ShowDetails();
+    else if (Tool(i) == 2)
+        NetStatusShow();
     else
         ShowSlider(i);
 }
@@ -256,6 +272,11 @@ void TrayToolsMenu(int i)
     POINT p;
     UINT cmd;
 
+    if (Tool(i) == 2) {
+        DestroyMenu(m);
+        TrayNetMenu();
+        return;
+    }
     if (Tool(i) == 0) {
         AppendMenu(m, MF_STRING, TTC_DETAILS, "&Details...");
         AppendMenu(m, MF_STRING, TTC_EXIT, "E&xit");

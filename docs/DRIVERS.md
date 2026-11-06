@@ -25,6 +25,7 @@ repository.
 - [USER Resource Extension](#user-resource-extension)
 - [GDI Resource Extension](#gdi-resource-extension)
 - [Turning a Driver Off](#turning-a-driver-off)
+- [Network Cards](#network-cards)
 
 ---
 
@@ -68,6 +69,11 @@ much memory the computer has.
 
 Windows has two groups of these areas: USER, for windows and menus, and GDI, for graphics. The two
 Resource Extensions move data out of them into memory of their own. Programs do not notice.
+
+Memory is another matter. Task Manager lists bitmaps under GDI, whichever program made them, so GDI can show a megabyte
+or more with its resources still mostly free. A wallpaper is the largest of them: at 1024x768 in 16-bit colour it takes
+1.5 MB. Snowball keeps a wallpaper to a sixth of the installed memory; past that it is painted from a 256-colour copy on
+disk, and nothing of it stays in memory. Setup's **Snowball manages the wallpaper** leaves it to Windows instead.
 
 Free resources at the end of two test sessions, at 16-bit colour:
 
@@ -150,3 +156,20 @@ Enabled=0
 ```
 
 Both drivers need a 386 or later and no math coprocessor. They have been tested in 386 enhanced mode.
+
+---
+
+## Network Cards
+
+Snowball has no network driver and needs none. Its tray icon, Network Status and Network Properties use what Windows
+for Workgroups already has:
+
+- the card's own driver, set up with Windows Setup under Change Network Settings
+- Microsoft TCP/IP-32, read through WINSOCK.DLL
+
+The icon shows only when the card started and TCP/IP-32 is running. With NetBEUI or IPX alone there is no icon. A card
+says nothing of its cable, so the icon goes by traffic, and asks the gateway by ping when the line is quiet.
+
+The card's **interrupt** and **I/O address** in Network Properties must match the card. A wrong I/O address brings
+Windows' message that the adapter is not working. A wrong interrupt can stop Windows while it starts: type `WIN /N` at
+the DOS prompt to start without the network, and correct it from Start, Settings, Network.

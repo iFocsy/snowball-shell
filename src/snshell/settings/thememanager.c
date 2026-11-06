@@ -63,7 +63,7 @@ static void LoadPicture(void)
     int i, index, style;
 
     if (!ThemeGet(chosen, "Wallpaper", value, MAX_PATH)) {
-        GetProfileString("Desktop", "Wallpaper", "", value, MAX_PATH);  /* (not set: as now) */
+        WallpaperShown(value, MAX_PATH);    /* (not set: as now) */
         if (!lstrcmpi(value, "(None)"))
             *value = '\0';
     }
@@ -106,7 +106,7 @@ static void PaintPicture(HWND dlg, HDC dc)
     if (!ThemeGet(chosen, "Colors", value, sizeof value) || !ColorSchemeParse(value, &cs))
         ColorSchemeCurrent(&cs);
     if (!ThemeGet(chosen, "TileWallpaper", value, sizeof value))
-        wsprintf(value, "%d", GetProfileInt("Desktop", "TileWallpaper", 0));
+        wsprintf(value, "%d", WallpaperTiled());
     SaveDC(dc);
     IntersectClipRect(dc, a.left, a.top, a.right, a.bottom);
     DisplayPropertiesDesktop(dc, &a, cs.colors[COLOR_BACKGROUND], &wall, *value == '1');

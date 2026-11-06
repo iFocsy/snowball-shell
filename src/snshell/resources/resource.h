@@ -38,6 +38,13 @@
 #define IDI_MUTED       257     /* SNDVOL32.EXE's tray speaker, muted */
 #define IDI_SPEAKER     258
 #define IDI_ART_LAST    258
+/* The network's tray icons, in SNSHELL.DLL; IDLE + 1 sending, + 2 receiving, + 3 both */
+#define IDI_NETIDLE     300
+#define IDI_NETSEND     301
+#define IDI_NETRECV     302
+#define IDI_NETBOTH     303
+#define IDI_NETDOWN     304
+#define IDI_NETWARN     305
 
 /* Bitmaps */
 #define IDB_STARTFLAG   100     /* the Start button's 16x16 flag, magenta = transparent */
@@ -101,6 +108,8 @@
 #define IDD_DATETIME    229     /* Date/Time Properties */
 #define IDD_STARTSIZE   230     /* Customize Start Menu (the two-column one's size) */
 #define IDD_THEMES      231     /* Theme Manager */
+#define IDD_NETSTATUS   232     /* the network's status window */
+#define IDD_NETPROPS    233     /* its settings */
 
 #define IDC_COMMAND     300
 #define IDC_BROWSE      301
@@ -197,6 +206,38 @@
 /* Property pages: the controls of a page share an id range, which is how
    a tab shows its page. Separators (drawn etched) are hidden statics. */
 #define IDC_PAGE1       1000    /* General: 1000..1049 */
+/* The network's status: General */
+#define IDC_NET_STATUS       1002
+#define IDC_NET_DURATION     1004
+#define IDC_NET_SPEED        1006
+#define IDC_NET_PICTURE      1009
+#define IDC_NET_SENT_PACKETS 1012
+#define IDC_NET_IN_PACKETS   1013
+#define IDC_NET_SENT_BYTES   1015
+#define IDC_NET_IN_BYTES     1016
+/* Support */
+#define IDC_NET_TYPE         1052
+#define IDC_NET_ADDRESS      1054
+#define IDC_NET_MASK         1056
+#define IDC_NET_GATEWAY      1058
+#define IDC_NET_CARD         1061
+#define IDC_NET_MAC          1063
+#define IDC_NET_PROPERTIES   690
+/* The network's settings: IP Address */
+#define IDC_NP_AUTO          1000
+#define IDC_NP_FIXED         1001
+#define IDC_NP_IP            1003
+#define IDC_NP_MASK          1005
+#define IDC_NP_GATEWAY       1007
+/* DNS */
+#define IDC_NP_HOST          1051
+#define IDC_NP_DOMAIN        1053
+#define IDC_NP_DNS1          1055
+#define IDC_NP_DNS2          1057
+/* Card */
+#define IDC_NP_CARD          1101
+#define IDC_NP_IRQ           1103
+#define IDC_NP_IO            1105
 #define IDC_PROPS_ICON      1000
 #define IDC_PROPS_NAME      1001
 #define IDC_PROPS_TYPE      1002

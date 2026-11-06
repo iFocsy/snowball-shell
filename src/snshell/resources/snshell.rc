@@ -3,6 +3,12 @@
 
 /* Snowball's own icon; Windows 98's icons, cursors and bitmaps are W98ART.DLL's */
 IDI_SNOWBALL    ICON "MAINICON.ICO"
+IDI_NETIDLE     ICON "NETIDLE.ICO"
+IDI_NETSEND     ICON "NETSEND.ICO"
+IDI_NETRECV     ICON "NETRECV.ICO"
+IDI_NETBOTH     ICON "NETBOTH.ICO"
+IDI_NETDOWN     ICON "NETDOWN.ICO"
+IDI_NETWARN     ICON "NETWARN.ICO"
 
 IDD_RUN DIALOG 0, 0, 236, 82
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
@@ -638,6 +644,79 @@ BEGIN
     CONTROL         "&Mute", IDC_VOLUME_MUTE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 7, 80, 34, 10
 END
 
+IDD_NETSTATUS DIALOG 0, 0, 216, 196
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Network Status"
+FONT 8, "MS Sans Serif"
+BEGIN
+    CONTROL         "", IDC_TABS, "SbTabs", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 6, 6, 204, 164
+    GROUPBOX        "Connection", 1000, 14, 26, 188, 58
+    LTEXT           "Status:", 1001, 22, 39, 60, 8
+    RTEXT           "", IDC_NET_STATUS, 84, 39, 110, 8, SS_NOPREFIX
+    LTEXT           "Duration:", 1003, 22, 53, 60, 8
+    RTEXT           "", IDC_NET_DURATION, 84, 53, 110, 8, SS_NOPREFIX
+    LTEXT           "Speed:", 1005, 22, 67, 60, 8
+    RTEXT           "", IDC_NET_SPEED, 84, 67, 110, 8, SS_NOPREFIX
+    GROUPBOX        "Activity", 1007, 14, 90, 188, 72
+    CTEXT           "Sent", 1008, 60, 108, 44, 8
+    ICON            IDI_NETIDLE, IDC_NET_PICTURE, 104, 100, 20, 20
+    CTEXT           "Received", 1010, 132, 108, 62, 8
+    LTEXT           "Packets:", 1011, 22, 130, 36, 8
+    RTEXT           "", IDC_NET_SENT_PACKETS, 60, 130, 60, 8, SS_NOPREFIX
+    RTEXT           "", IDC_NET_IN_PACKETS, 130, 130, 64, 8, SS_NOPREFIX
+    LTEXT           "Bytes:", 1014, 22, 144, 36, 8
+    RTEXT           "", IDC_NET_SENT_BYTES, 60, 144, 60, 8, SS_NOPREFIX
+    RTEXT           "", IDC_NET_IN_BYTES, 130, 144, 64, 8, SS_NOPREFIX
+    GROUPBOX        "Connection status", 1050, 14, 26, 188, 76
+    LTEXT           "Address Type:", 1051, 22, 40, 70, 8
+    RTEXT           "", IDC_NET_TYPE, 94, 40, 100, 8, SS_NOPREFIX
+    LTEXT           "IP Address:", 1053, 22, 54, 70, 8
+    RTEXT           "", IDC_NET_ADDRESS, 94, 54, 100, 8, SS_NOPREFIX
+    LTEXT           "Subnet Mask:", 1055, 22, 68, 70, 8
+    RTEXT           "", IDC_NET_MASK, 94, 68, 100, 8, SS_NOPREFIX
+    LTEXT           "Default Gateway:", 1057, 22, 82, 70, 8
+    RTEXT           "", IDC_NET_GATEWAY, 94, 82, 100, 8, SS_NOPREFIX
+    GROUPBOX        "Network card", 1059, 14, 108, 188, 48
+    LTEXT           "Name:", 1060, 22, 122, 50, 8
+    RTEXT           "", IDC_NET_CARD, 74, 122, 120, 8, SS_NOPREFIX
+    LTEXT           "Physical Address:", 1062, 22, 136, 70, 8
+    RTEXT           "", IDC_NET_MAC, 94, 136, 100, 8, SS_NOPREFIX
+    PUSHBUTTON      "&Properties", IDC_NET_PROPERTIES, 6, 176, 58, 14
+    DEFPUSHBUTTON   "Close", IDOK, 160, 176, 50, 14
+END
+IDD_NETPROPS DIALOG 0, 0, 216, 158
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Network Properties"
+FONT 8, "MS Sans Serif"
+BEGIN
+    CONTROL         "", IDC_TABS, "SbTabs", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 6, 6, 204, 126
+    CONTROL         "&Obtain an IP address automatically", IDC_NP_AUTO, "Button", BS_AUTORADIOBUTTON | WS_TABSTOP, 16, 30, 180, 10
+    CONTROL         "&Use this IP address:", IDC_NP_FIXED, "Button", BS_AUTORADIOBUTTON, 16, 44, 180, 10
+    LTEXT           "IP &Address:", 1002, 28, 62, 62, 8
+    EDITTEXT        IDC_NP_IP, 94, 60, 100, 12, ES_AUTOHSCROLL
+    LTEXT           "Subnet &Mask:", 1004, 28, 78, 62, 8
+    EDITTEXT        IDC_NP_MASK, 94, 76, 100, 12, ES_AUTOHSCROLL
+    LTEXT           "Default &Gateway:", 1006, 28, 94, 62, 8
+    EDITTEXT        IDC_NP_GATEWAY, 94, 92, 100, 12, ES_AUTOHSCROLL
+    LTEXT           "&Host Name:", 1050, 16, 32, 62, 8
+    EDITTEXT        IDC_NP_HOST, 84, 30, 112, 12, ES_AUTOHSCROLL
+    LTEXT           "&Domain:", 1052, 16, 48, 62, 8
+    EDITTEXT        IDC_NP_DOMAIN, 84, 46, 112, 12, ES_AUTOHSCROLL
+    LTEXT           "DNS &Server:", 1054, 16, 64, 62, 8
+    EDITTEXT        IDC_NP_DNS1, 84, 62, 112, 12, ES_AUTOHSCROLL
+    LTEXT           "&Second Server:", 1056, 16, 80, 62, 8
+    EDITTEXT        IDC_NP_DNS2, 84, 78, 112, 12, ES_AUTOHSCROLL
+    LTEXT           "Leave the servers empty to use those the network gives.", 1058, 16, 98, 180, 18
+    LTEXT           "Card:", 1100, 16, 32, 62, 8
+    LTEXT           "", IDC_NP_CARD, 84, 32, 112, 8, SS_NOPREFIX
+    LTEXT           "&Interrupt (IRQ):", 1102, 16, 48, 62, 8
+    EDITTEXT        IDC_NP_IRQ, 84, 46, 40, 12, ES_AUTOHSCROLL
+    LTEXT           "I/O &Address:", 1104, 16, 64, 62, 8
+    EDITTEXT        IDC_NP_IO, 84, 62, 40, 12, ES_AUTOHSCROLL
+    LTEXT           "These must match the card itself. A wrong interrupt stops Windows while it starts: type WIN /N at the DOS prompt, then correct it from Start, Settings, Network.", 1106, 16, 82, 180, 34
+    DEFPUSHBUTTON   "OK", IDOK, 104, 138, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 160, 138, 50, 14
+END
 IDD_RESMETER DIALOG 0, 0, 212, 80
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Resource Meter"
